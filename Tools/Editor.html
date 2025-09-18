@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Editor for AM-Station-Info database</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background-color: #f9f9f9; }
+        table { border-collapse: collapse; width: 100%; font-size: 12px; background-color: white; }
+        th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        button { cursor: pointer; padding: 4px 8px; border-radius: 4px; border: 1px solid #ccc; }
+        button:disabled { cursor: not-allowed; opacity: 0.5; }
+        #edit-form, #bulk-add-section { margin-top: 15px; padding: 20px; border: 2px solid #ccc; border-radius: 10px; background-color: white; }
+        #edit-form h2, #bulk-add-section h2 { margin-top: 0; }
+        .form-grid { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+        .form-field { display: flex; flex-direction: column; }
+        .form-field label { margin-bottom: 5px; font-weight: bold; font-size: 12px; display: flex; align-items: center; gap: 5px; }
+        .form-field input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        #form-frequency_khz, .bulk-frequency_khz { width: 8ch; }
+        #form-station, .bulk-station { flex: 1; min-width: 150px; }
+        #form-time_utc, .bulk-time_utc { width: 11ch; }
+        #form-days, .bulk-days { width: 9ch; }
+        #form-language, .bulk-language { flex: 1; min-width: 120px; }
+        #form-power_kw, .bulk-power_kw { width: 10ch; }
+        #form-azimuth, .bulk-azimuth { width: 5ch; }
+        #form-location, .bulk-location { flex: 1; min-width: 150px; }
+        #form-country_code, .bulk-country_code { width: 7ch; }
+        #form-latlon, .bulk-latlon { width: 17ch; }
+        #form-remarks, .bulk-remarks { flex: 1; min-width: 120px; }
+        .form-actions { margin-top: 20px; }
+        .controls { display: flex; gap: 20px; align-items: center; margin-bottom: 15px; padding: 10px; background-color: #eee; border-radius: 5px; }
+        .pagination { display: flex; gap: 10px; align-items: center; }
+        #bulk-add-container { margin-top: 15px; display: flex; flex-direction: column; gap: 15px; }
+        .bulk-add-item { padding: 15px; border: 1px solid #a2a2a2; border-radius: 8px; background-color: #fdfdfd; position: relative; }
+        .bulk-item-controls { position: absolute; top: 5px; right: 5px; display: flex; gap: 5px; }
+        .bulk-item-controls button { font-size: 14px; font-weight: bold; width: 24px; height: 24px; }
+        #mode-selection { margin-top: 30px; padding: 10px; background-color: #eee; border-radius: 5px; display: flex; gap: 10px; }
+        #mode-selection button.active { background-color: #007bff; color: white; border-color: #007bff; }
+
+        /* Tooltip Styles */
+        .tooltip {
+            position: relative;
+            display: inline-block;
+            cursor: help;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: 220px;
+            background-color: #555;
+            color: #fff;
+            text-align: left;
+            border-radius: 6px;
+            padding: 8px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -110px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-weight: normal;
+            font-size: 11px;
+        }
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Editor for AM-Station-Info user database</h1>
+    <p><input type="file" id="fileInput" accept=".json"></p>
+    
+    <div class="controls">
+        <div>
+            <label for="searchInput">Search:</label>
+            <input type="text" id="searchInput" placeholder="Search all fields...">
+        </div>
+        <div>
+            <label for="itemsPerPageSelect">Show per page:</label>
+            <select id="itemsPerPageSelect">
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="150">150</option>
+                <option value="200">200</option>
+                <option value="500">500</option>
+                <option value="all">All</option>
+            </select>
+        </div>
+        <div class="pagination">
+            <button id="prevButton">&lt; Previous</button>
+            <span id="pageInfo"></span>
+            <button id="nextButton">Next &gt;</button>
+        </div>
+    </div>
+    
+    <table id="stationTable">
+        <thead>
+            <tr>
+                <th>Frequency</th><th>Station</th><th>Time (UTC)</th><th>Days</th><th>Language</th>
+                <th>Power</th><th>Location</th><th>Country</th><th>Lat/Lon</th><th>Actions</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <div id="mode-selection">
+        <button id="mode-single-btn" class="active">Single Station</button>
+        <button id="mode-bulk-btn">Bulk Add</button>
+    </div>
+
+    <form id="edit-form">
+        <h2 id="form-title">Add / Edit Station</h2>
+        <input type="hidden" id="edit-index">
+        <div class="form-grid">
+            <div class="form-field"><label for="form-frequency_khz">Frequency (kHz)</label><input type="number" id="form-frequency_khz" max="99999" required></div>
+            <div class="form-field"><label for="form-station">Station</label><input type="text" id="form-station" maxlength="50" required></div>
+            <div class="form-field"><label for="form-time_utc">Time (UTC)</label><input type="text" id="form-time_utc" maxlength="9" placeholder="0000-2400"></div>
+            <div class="form-field">
+                <label for="form-days">Days 
+                    <span class="tooltip">(?)
+                        <span class="tooltiptext">Format: 1234567 (1=Sunday). Use a dot for days without transmission, e.g., 12.45..</span>
+                    </span>
+                </label>
+                <input type="text" id="form-days" maxlength="7" placeholder="1234567">
+            </div>
+            <div class="form-field"><label for="form-language">Language</label><input type="text" id="form-language" maxlength="40"></div>
+            <div class="form-field"><label for="form-power_kw">Power (kW)</label><input type="number" id="form-power_kw" max="99999999"></div>
+            <div class="form-field"><label for="form-azimuth">Azimuth</label><input type="text" id="form-azimuth" maxlength="3" placeholder="ND"></div>
+            <div class="form-field"><label for="form-location">Location</label><input type="text" id="form-location" maxlength="50"></div>
+            <div class="form-field"><label for="form-country_code">Country Code</label><input type="text" id="form-country_code" maxlength="5"></div>
+            <div class="form-field">
+                <label for="form-latlon">Lat/Lon
+                    <span class="tooltip">(?)
+                        <span class="tooltiptext">Format: DDMMSS(N/S)DDDMMSS(E/W), e.g., 332756N1301032E.</span>
+                    </span>
+                </label>
+                <input type="text" id="form-latlon" maxlength="15" placeholder="332756N1301032E">
+            </div>
+            <div class="form-field"><label for="form-remarks">Remarks</label><input type="text" id="form-remarks" maxlength="30"></div>
+        </div>
+        <div class="form-actions">
+            <button type="submit" id="form-submit-button">Add Station</button>
+            <button type="button" id="form-cancel-button" style="display:none;">Cancel Edit</button>
+        </div>
+    </form>
+
+    <section id="bulk-add-section" style="display:none;">
+        <h2>Bulk Add Stations</h2>
+        <div id="bulk-add-container"></div>
+        <div class="form-actions">
+            <button id="bulk-add-new-button">Add New Empty Form</button>
+            <button id="bulk-add-all-button">Add All to Main List</button>
+            <button id="bulk-clear-button">Clear All</button>
+        </div>
+    </section>
+
+    <br>
+    <button id="saveButton">Save Changes (Download File)</button>
+
+    <script>
+        let stationData = [];
+        let filteredData = [];
+        let currentPage = 1;
+        let currentFilename = 'user.json';
+
+        const fileInput = document.getElementById('fileInput');
+        const tableBody = document.querySelector("#stationTable tbody");
+        const saveButton = document.getElementById('saveButton');
+        const searchInput = document.getElementById('searchInput');
+        const itemsPerPageSelect = document.getElementById('itemsPerPageSelect');
+        const prevButton = document.getElementById('prevButton');
+        const nextButton = document.getElementById('nextButton');
+        const pageInfo = document.getElementById('pageInfo');
+        
+        const modeSingleBtn = document.getElementById('mode-single-btn');
+        const modeBulkBtn = document.getElementById('mode-bulk-btn');
+
+        const editForm = document.getElementById('edit-form');
+        const formTitle = document.getElementById('form-title');
+        const formSubmitButton = document.getElementById('form-submit-button');
+        const formCancelButton = document.getElementById('form-cancel-button');
+        const editIndexInput = document.getElementById('edit-index');
+        
+        const bulkAddSection = document.getElementById('bulk-add-section');
+        const bulkAddContainer = document.getElementById('bulk-add-container');
+        const bulkAddNewButton = document.getElementById('bulk-add-new-button');
+        const bulkAddAllButton = document.getElementById('bulk-add-all-button');
+        const bulkClearButton = document.getElementById('bulk-clear-button');
+
+        // Event Listeners
+        fileInput.addEventListener('change', handleFileLoad);
+        searchInput.addEventListener('input', applyFilters);
+        itemsPerPageSelect.addEventListener('change', () => { currentPage = 1; renderPage(); });
+        prevButton.addEventListener('click', () => { if (currentPage > 1) { currentPage--; renderPage(); } });
+        nextButton.addEventListener('click', () => { currentPage++; renderPage(); });
+        
+        modeSingleBtn.addEventListener('click', () => switchMode('single'));
+        modeBulkBtn.addEventListener('click', () => switchMode('bulk'));
+
+        editForm.addEventListener('submit', handleFormSubmit);
+        formCancelButton.addEventListener('click', resetForm);
+        
+        bulkAddContainer.addEventListener('click', handleBulkItemClick);
+        bulkAddNewButton.addEventListener('click', () => {
+             const newItem = createBulkAddItem({}); // Add empty item
+             bulkAddContainer.appendChild(newItem);
+        });
+        bulkAddAllButton.addEventListener('click', handleBulkAddAll);
+        bulkClearButton.addEventListener('click', clearBulkItems);
+
+        function switchMode(mode) {
+            if (mode === 'single') {
+                editForm.style.display = 'block';
+                bulkAddSection.style.display = 'none';
+                modeSingleBtn.classList.add('active');
+                modeBulkBtn.classList.remove('active');
+            } else { // mode === 'bulk'
+                editForm.style.display = 'none';
+                bulkAddSection.style.display = 'block';
+                modeSingleBtn.classList.remove('active');
+                modeBulkBtn.classList.add('active');
+                
+                if (bulkAddContainer.children.length === 0) {
+                    const newItem = createBulkAddItem({});
+                    bulkAddContainer.appendChild(newItem);
+                }
+                bulkAddSection.scrollIntoView({ behavior: 'smooth' });
+            }
+        }
+
+        function handleFileLoad(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            currentFilename = file.name;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    stationData = JSON.parse(e.target.result);
+                    applyFilters();
+                } catch (error) { alert("Could not read the file. Is it a valid JSON file?"); }
+            };
+            reader.readAsText(file);
+        }
+
+        function applyFilters() {
+            const searchTerm = searchInput.value.toLowerCase();
+            filteredData = !searchTerm ? [...stationData] : stationData.filter(station => 
+                Object.values(station).some(value => String(value).toLowerCase().includes(searchTerm))
+            );
+            currentPage = 1;
+            renderPage();
+        }
+
+        function renderPage() {
+            const itemsPerPage = itemsPerPageSelect.value === 'all' ? filteredData.length : parseInt(itemsPerPageSelect.value, 10);
+            const totalPages = Math.max(1, Math.ceil(filteredData.length / itemsPerPage));
+            currentPage = Math.max(1, Math.min(currentPage, totalPages));
+            const start = (currentPage - 1) * itemsPerPage;
+            const end = start + itemsPerPage;
+            const pageData = filteredData.slice(start, end);
+            displayStations(pageData);
+            pageInfo.textContent = `Page ${currentPage} of ${totalPages} (${filteredData.length} matches)`;
+            prevButton.disabled = currentPage === 1;
+            nextButton.disabled = currentPage === totalPages;
+        }
+
+        function displayStations(stationsToDisplay) {
+            const rowsHtml = stationsToDisplay.map((station) => {
+                const originalIndex = stationData.findIndex(s => s === station);
+                return `
+                    <tr>
+                        <td>${station.frequency_khz || ''}</td><td>${station.station || ''}</td>
+                        <td>${station.time_utc || ''}</td><td>${station.days || ''}</td>
+                        <td>${station.language || ''}</td><td>${station.power_kw || ''}</td>
+                        <td>${station.location || ''}</td><td>${station.country_code || ''}</td>
+                        <td>${station.latlon || ''}</td>
+                        <td>
+                            <button onclick="editStation(${originalIndex})">Edit</button>
+                            <button onclick="deleteStation(${originalIndex})">Delete</button>
+                        </td>
+                    </tr>`;
+            });
+            tableBody.innerHTML = rowsHtml.join('');
+        }
+
+        function deleteStation(originalIndex) {
+            if (confirm(`Delete station: ${stationData[originalIndex].station}?`)) {
+                stationData.splice(originalIndex, 1);
+                applyFilters();
+            }
+        }
+
+        function editStation(originalIndex) {
+            switchMode('single');
+            const station = stationData[originalIndex];
+            formTitle.textContent = 'Editing Station';
+            editIndexInput.value = originalIndex;
+            for (const key in station) {
+                const input = document.getElementById(`form-${key}`);
+                if (input) input.value = station[key] || '';
+            }
+            formSubmitButton.textContent = 'Save Changes';
+            formCancelButton.style.display = 'inline-block';
+            editForm.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function resetForm() {
+            editForm.reset();
+            formTitle.textContent = 'Add / Edit Station';
+            editIndexInput.value = '';
+            formSubmitButton.textContent = 'Add Station';
+            formCancelButton.style.display = 'none';
+        }
+
+        function getStationFromMainForm() {
+            return {
+                frequency_khz: parseInt(document.getElementById('form-frequency_khz').value, 10) || null,
+                station: document.getElementById('form-station').value,
+                time_utc: document.getElementById('form-time_utc').value,
+                days: document.getElementById('form-days').value,
+                language: document.getElementById('form-language').value,
+                power_kw: parseInt(document.getElementById('form-power_kw').value, 10) || null,
+                azimuth: document.getElementById('form-azimuth').value,
+                location: document.getElementById('form-location').value,
+                country_code: document.getElementById('form-country_code').value,
+                latlon: document.getElementById('form-latlon').value,
+                remarks: document.getElementById('form-remarks').value,
+            };
+        }
+
+        function handleFormSubmit(event) {
+            event.preventDefault();
+            const newStation = getStationFromMainForm();
+            const editIndex = editIndexInput.value;
+
+            if (editIndex !== '') {
+                stationData[parseInt(editIndex, 10)] = newStation;
+            } else {
+                if (!newStation.frequency_khz || !newStation.station) {
+                    alert("Frequency and station name are required to add a new station.");
+                    return;
+                }
+                stationData.push(newStation);
+            }
+            applyFilters();
+            resetForm();
+        }
+        
+        function createBulkAddItem(station) {
+            const newItem = document.createElement('div');
+            newItem.className = 'bulk-add-item';
+            newItem.innerHTML = `
+                <div class="bulk-item-controls">
+                    <button class="clone-btn" title="Clone this item">+</button>
+                    <button class="remove-btn" title="Remove this item">X</button>
+                </div>
+                <div class="form-grid">
+                    <div class="form-field"><label>Frequency</label><input type="number" class="bulk-frequency_khz" value="${station.frequency_khz || ''}"></div>
+                    <div class="form-field"><label>Station</label><input type="text" class="bulk-station" value="${station.station || ''}"></div>
+                    <div class="form-field"><label>Time (UTC)</label><input type="text" class="bulk-time_utc" value="${station.time_utc || ''}"></div>
+                    <div class="form-field">
+                        <label>Days
+                            <span class="tooltip">(?)<span class="tooltiptext">Format: 1234567 (1=Sunday). Use a dot for days without transmission, e.g., 12.45..</span></span>
+                        </label>
+                        <input type="text" class="bulk-days" value="${station.days || ''}">
+                    </div>
+                    <div class="form-field"><label>Language</label><input type="text" class="bulk-language" value="${station.language || ''}"></div>
+                    <div class="form-field"><label>Power</label><input type="number" class="bulk-power_kw" value="${station.power_kw || ''}"></div>
+                    <div class="form-field"><label>Azimuth</label><input type="text" class="bulk-azimuth" value="${station.azimuth || ''}"></div>
+                    <div class="form-field"><label>Location</label><input type="text" class="bulk-location" value="${station.location || ''}"></div>
+                    <div class="form-field"><label>Country</label><input type="text" class="bulk-country_code" value="${station.country_code || ''}"></div>
+                    <div class="form-field">
+                        <label>Lat/Lon
+                             <span class="tooltip">(?)<span class="tooltiptext">Format: DDMMSS(N/S)DDDMMSS(E/W), e.g., 332756N1301032E.</span></span>
+                        </label>
+                        <input type="text" class="bulk-latlon" value="${station.latlon || ''}">
+                    </div>
+                    <div class="form-field"><label>Remarks</label><input type="text" class="bulk-remarks" value="${station.remarks || ''}"></div>
+                </div>`;
+            return newItem;
+        }
+
+        function handleBulkItemClick(event) {
+            const target = event.target;
+            const parentItem = target.closest('.bulk-add-item');
+            if (!parentItem) return;
+            if (target.classList.contains('clone-btn')) {
+                const stationToClone = {
+                    frequency_khz: parentItem.querySelector('.bulk-frequency_khz').value || '',
+                    station: parentItem.querySelector('.bulk-station').value,
+                    time_utc: '', // Clear this field
+                    days: '', // Clear this field
+                    language: '', // Clear this field
+                    power_kw: parentItem.querySelector('.bulk-power_kw').value || '',
+                    azimuth: parentItem.querySelector('.bulk-azimuth').value,
+                    location: parentItem.querySelector('.bulk-location').value,
+                    country_code: parentItem.querySelector('.bulk-country_code').value,
+                    latlon: parentItem.querySelector('.bulk-latlon').value,
+                    remarks: parentItem.querySelector('.bulk-remarks').value,
+                };
+                const newItem = createBulkAddItem(stationToClone);
+                parentItem.after(newItem);
+            } else if (target.classList.contains('remove-btn')) {
+                parentItem.remove();
+            }
+        }
+
+        function handleBulkAddAll() {
+            const items = bulkAddContainer.querySelectorAll('.bulk-add-item');
+            if (items.length === 0) {
+                alert("No items to add.");
+                return;
+            }
+            let addedCount = 0;
+            items.forEach(item => {
+                const newStation = {
+                    frequency_khz: parseInt(item.querySelector('.bulk-frequency_khz').value, 10) || null,
+                    station: item.querySelector('.bulk-station').value,
+                    time_utc: item.querySelector('.bulk-time_utc').value,
+                    days: item.querySelector('.bulk-days').value,
+                    language: item.querySelector('.bulk-language').value,
+                    power_kw: parseInt(item.querySelector('.bulk-power_kw').value, 10) || null,
+                    azimuth: item.querySelector('.bulk-azimuth').value,
+                    location: item.querySelector('.bulk-location').value,
+                    country_code: item.querySelector('.bulk-country_code').value,
+                    latlon: item.querySelector('.bulk-latlon').value,
+                    remarks: item.querySelector('.bulk-remarks').value,
+                };
+                if (newStation.frequency_khz && newStation.station) {
+                    stationData.push(newStation);
+                    addedCount++;
+                }
+            });
+            applyFilters();
+            clearBulkItems();
+            switchMode('single');
+            alert(`${addedCount} station(s) added to the main list.`);
+        }
+
+        function clearBulkItems() {
+            bulkAddContainer.innerHTML = '';
+        }
+        
+        function getTimestamp() {
+            const now = new Date();
+            const Y = now.getFullYear();
+            const M = String(now.getMonth() + 1).padStart(2, '0');
+            const D = String(now.getDate()).padStart(2, '0');
+            const h = String(now.getHours()).padStart(2, '0');
+            const m = String(now.getMinutes()).padStart(2, '0');
+            return `${Y}-${M}-${D}_${h}-${m}`;
+        }
+
+        saveButton.addEventListener('click', function() {
+            const jsonString = JSON.stringify(stationData, null, 2);
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const timestamp = getTimestamp();
+            const baseFilename = currentFilename.replace(/\.json$/i, '').replace(/_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}$/, '');
+            const newFilename = `${baseFilename}_${timestamp}.json`;
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = newFilename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+        // Initialize the view
+        switchMode('single');
+
+    </script>
+
+</body>
+</html>
