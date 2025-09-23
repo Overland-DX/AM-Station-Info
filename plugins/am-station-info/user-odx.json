@@ -1,0 +1,15 @@
+[
+  {
+    "frequency_khz": 9800,
+    "station": "Radio Delta",
+    "time_utc": "0700-1900",
+    "days": "1234567",
+    "language": "Dutch",
+    "power_kw": null,
+    "azimuth": "",
+    "location": "Elburg ",
+    "country_code": "NL",
+    "latlon": "522514N0055033E",
+    "remarks": "Test Broadcast"
+  }
+]
