@@ -9,8 +9,8 @@
             background-color: #f0f2f5; 
         }
         .container {
-            max-width: 1600px; /* Fast bredde */
-            margin: 20px auto; /* Sentrering */
+            max-width: 1600px;
+            margin: 20px auto;
             padding: 20px; 
             background-color: #f9f9f9; 
             border-radius: 8px; 
@@ -111,7 +111,7 @@
             display: flex; 
             gap: 10px; 
             align-items: center; 
-            margin-left: auto; /* Skyver paginering til høyre */
+            margin-left: auto;
         }
         #bulk-add-container { 
             margin-top: 15px; 
@@ -278,7 +278,7 @@
                 <input type="text" id="form-days" maxlength="7" placeholder="1234567">
             </div>
             <div class="form-field"><label for="form-language">Language</label><input type="text" id="form-language" maxlength="40"></div>
-            <div class="form-field"><label for="form-power_kw">Power (kW)</label><input type="number" id="form-power_kw" max="99999999"></div>
+            <div class="form-field"><label for="form-power_kw">Power (kW)</label><input type="number" id="form-power_kw" max="99999999" step="any"></div>
             <div class="form-field"><label for="form-azimuth">Azimuth</label><input type="text" id="form-azimuth" maxlength="3" placeholder="ND"></div>
             <div class="form-field"><label for="form-location">Location</label><input type="text" id="form-location" maxlength="50"></div>
             <div class="form-field"><label for="form-country_code">Country Code</label><input type="text" id="form-country_code" maxlength="5"></div>
@@ -395,7 +395,7 @@
                     "time_utc": line.substring(38, 47).trim(),
                     "days": line.substring(48, 55).trim(),
                     "language": line.substring(56, 76).trim(),
-                    "power_kw": /^\d+$/.test(powerStr) ? parseInt(powerStr, 10) : null,
+                    "power_kw": !isNaN(parseFloat(powerStr)) ? parseFloat(powerStr) : null,
                     "azimuth": line.substring(81, 84).trim(),
                     "location": line.substring(85, 109).trim(),
                     "country_code": line.substring(109, 112).trim(),
@@ -601,7 +601,7 @@
                 time_utc: document.getElementById('form-time_utc').value,
                 days: document.getElementById('form-days').value,
                 language: document.getElementById('form-language').value,
-                power_kw: parseInt(document.getElementById('form-power_kw').value, 10) || null,
+                power_kw: parseFloat(document.getElementById('form-power_kw').value) || null,
                 azimuth: document.getElementById('form-azimuth').value,
                 location: document.getElementById('form-location').value,
                 country_code: document.getElementById('form-country_code').value,
@@ -639,7 +639,7 @@
                     <div class="form-field"><label>Time (UTC)</label><input type="text" class="bulk-time_utc" value="${station.time_utc || ''}"></div>
                     <div class="form-field"><label>Days<span class="tooltip">(?)<span class="tooltiptext">Format: 1234567 (1=Sunday).</span></span></label><input type="text" class="bulk-days" value="${station.days || ''}"></div>
                     <div class="form-field"><label>Language</label><input type="text" class="bulk-language" value="${station.language || ''}"></div>
-                    <div class="form-field"><label>Power</label><input type="number" class="bulk-power_kw" value="${station.power_kw || ''}"></div>
+                    <div class="form-field"><label>Power</label><input type="number" class="bulk-power_kw" value="${station.power_kw || ''}" step="any"></div>
                     <div class="form-field"><label>Azimuth</label><input type="text" class="bulk-azimuth" value="${station.azimuth || ''}"></div>
                     <div class="form-field"><label>Location</label><input type="text" class="bulk-location" value="${station.location || ''}"></div>
                     <div class="form-field"><label>Country</label><input type="text" class="bulk-country_code" value="${station.country_code || ''}"></div>
@@ -682,7 +682,7 @@
                     time_utc: item.querySelector('.bulk-time_utc').value,
                     days: item.querySelector('.bulk-days').value,
                     language: item.querySelector('.bulk-language').value,
-                    power_kw: parseInt(item.querySelector('.bulk-power_kw').value, 10) || null,
+                    power_kw: parseFloat(item.querySelector('.bulk-power_kw').value) || null,
                     azimuth: item.querySelector('.bulk-azimuth').value,
                     location: item.querySelector('.bulk-location').value,
                     country_code: item.querySelector('.bulk-country_code').value,
