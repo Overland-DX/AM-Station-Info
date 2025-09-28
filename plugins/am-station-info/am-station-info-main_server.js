@@ -23,7 +23,7 @@ function parseLatLon(latlonStr) {
     try {
         const lat_match = dms_str.match(/(\d{4,6}[NS])/);
         const lon_match = dms_str.match(/(\d{5,8}[EW])/);
-        if (!lat_match || !lon_match) return { latitude: 0, longitude: 0 };
+        if (!lat_match || !lon_match) return { latitude: null, longitude: null };
         const convert = (s) => {
             const direction = s.slice(-1); const val = s.slice(0, -1); let deg, min, sec;
             if (direction === 'N' || direction === 'S') {
@@ -90,13 +90,13 @@ const stationsFromFile = jsonData.map(station => {
 } catch (error) {
     logError(`${pluginName}: An error occurred while loading station files.`, error);
 }
-
+/*
 function hasValidCoords(stasjon) {
   return Number.isFinite(stasjon.latitude) &&
          Number.isFinite(stasjon.longitude) &&
          stasjon.latitude !== 0 && stasjon.longitude !== 0;
 }
-
+*/
 function beregnAvstand(lat1, lon1, lat2, lon2) {
     if (isNaN(lat1) || isNaN(lon1) || isNaN(lat2) || isNaN(lon2)) return 0;
     const R = 6371;
@@ -141,13 +141,18 @@ const filtrerteStasjoner = stasjonsData.filter(stasjon => {
   const freqMatch = stasjon.frequency_khz && Math.abs(stasjon.frequency_khz - requestFreq) <= 2;
   const dayMatch  = stasjon.days_active && stasjon.days_active.includes(dayString);
   const timeMatch = isTimeActive(stasjon.time_utc, nowInMinutes);
-  return freqMatch && dayMatch && timeMatch && hasValidCoords(stasjon);
+  // return freqMatch && dayMatch && timeMatch && hasValidCoords(stasjon);
+  return freqMatch && dayMatch && timeMatch; // Ny
 });
 
     if (filtrerteStasjoner.length === 0) return res.json({ status: 'success', message: 'No active stations found.', stations: [] });
 
 const resultat = filtrerteStasjoner.map(stasjon => {
-  const avstand = beregnAvstand(userLat, userLon, stasjon.latitude, stasjon.longitude);
+  // Sjekk om vi har gyldige koordinater før vi beregner avstand
+  const hasCoords = stasjon.latitude !== null && stasjon.longitude !== null;
+  const avstand = hasCoords 
+    ? beregnAvstand(userLat, userLon, stasjon.latitude, stasjon.longitude) 
+    : null; // Sett avstand til null hvis koordinater mangler
 
   const alternative_frequencies = stasjonsData
     .filter(other =>
@@ -167,7 +172,7 @@ const resultat = filtrerteStasjoner.map(stasjon => {
     language: stasjon.language,
     timeUTC: stasjon.time_utc,
     power: stasjon.power_kw,
-    distance: avstand,
+    distance: avstand, // Bruk den nye 'avstand'-variabelen
     source: stasjon.source,
     alternative_frequencies: unikeAlternativer,
     latitude: stasjon.latitude,
@@ -181,7 +186,26 @@ const resultat = filtrerteStasjoner.map(stasjon => {
   };
 });
 
-    resultat.sort((a, b) => a.distance - b.distance);
+// Oppdatert sorteringsfunksjon som håndterer null-verdier
+resultat.sort((a, b) => {
+    const aHasDist = a.distance !== null;
+    const bHasDist = b.distance !== null;
+
+    if (aHasDist && bHasDist) {
+        // Begge har avstand, sorter normalt
+        return a.distance - b.distance;
+    } else if (aHasDist) {
+        // Kun 'a' har avstand, 'a' kommer først
+        return -1;
+    } else if (bHasDist) {
+        // Kun 'b' har avstand, 'b' kommer først
+        return 1;
+    } else {
+        // Ingen har avstand, behold rekkefølgen
+        return 0;
+    }
+});
+
     res.json({ status: 'success', stations: resultat });
 });
 

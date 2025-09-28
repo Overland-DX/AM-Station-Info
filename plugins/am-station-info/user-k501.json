@@ -1,0 +1,67 @@
+[
+  {
+    "frequency_khz": 1188,
+    "station": "Radio Studio X",
+    "time_utc": "0000-2400",
+    "days": "1234567",
+    "language": "Italian (AM Stereo)",
+    "power_kw": null,
+    "azimuth": "",
+    "location": "PISTOIA",
+    "country_code": "I",
+    "latlon": "435551N0105332E",
+    "remarks": "Kurer501"
+  },
+  {
+    "frequency_khz": 1368,
+    "station": "Manx Radio Gold",
+    "time_utc": "0000-2400",
+    "days": "1234567",
+    "language": "English",
+    "power_kw": null,
+    "azimuth": "",
+    "location": "Douglas/Foxdale",
+    "country_code": "G",
+    "latlon": "541208N0043428W",
+    "remarks": "Kurer501"
+  },
+  {
+    "frequency_khz": 1485,
+    "station": "Radio Studio X",
+    "time_utc": "0000-2400",
+    "days": "1234567",
+    "language": "Italian (AM Stereo)",
+    "power_kw": null,
+    "azimuth": "",
+    "location": "LIVORNO",
+    "country_code": "I",
+    "latlon": "433249N0101300E",
+    "remarks": "Kurer501"
+  },
+  {
+    "frequency_khz": 1485,
+    "station": "NRK P1",
+    "time_utc": "0000-2400",
+    "days": "1234567",
+    "language": "Norwegian",
+    "power_kw": 3,
+    "azimuth": "",
+    "location": "Skjæringa/Longyearbyen",
+    "country_code": "NOR",
+    "latlon": "781323N0153653E",
+    "remarks": "Kurer501"
+  },
+  {
+    "frequency_khz": 1584,
+    "station": "Radio Studio X",
+    "time_utc": "0000-2400",
+    "days": "1234567",
+    "language": "Italian (AM Stereo)",
+    "power_kw": null,
+    "azimuth": "",
+    "location": "AREZZO",
+    "country_code": "I",
+    "latlon": "432522N0114814E",
+    "remarks": "Kurer501"
+  }
+]
