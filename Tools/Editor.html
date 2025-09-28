@@ -1,21 +1,88 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="no">
 <head>
     <meta charset="UTF-8">
     <title>Editor for AM-Station-Info database</title>
     <style>
-        body { font-family: sans-serif; margin: 20px; background-color: #f9f9f9; }
-        table { border-collapse: collapse; width: 100%; font-size: 12px; background-color: white; }
-        th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        button { cursor: pointer; padding: 4px 8px; border-radius: 4px; border: 1px solid #ccc; }
-        button:disabled { cursor: not-allowed; opacity: 0.5; }
-        #edit-form, #bulk-add-section { margin-top: 15px; padding: 20px; border: 2px solid #ccc; border-radius: 10px; background-color: white; }
-        #edit-form h2, #bulk-add-section h2 { margin-top: 0; }
-        .form-grid { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
-        .form-field { display: flex; flex-direction: column; }
-        .form-field label { margin-bottom: 5px; font-weight: bold; font-size: 12px; display: flex; align-items: center; gap: 5px; }
-        .form-field input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        body { 
+            font-family: sans-serif; 
+            background-color: #f0f2f5; 
+        }
+        .container {
+            max-width: 1600px; /* Fast bredde */
+            margin: 20px auto; /* Sentrering */
+            padding: 20px; 
+            background-color: #f9f9f9; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .file-loader {
+            padding: 15px;
+            background-color: #e9edf2;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        table { 
+            border-collapse: collapse; 
+            width: 100%; 
+            font-size: 12px; 
+            background-color: white; 
+        }
+        th, td { 
+            border: 1px solid #ccc; 
+            padding: 6px; 
+            text-align: left; 
+        }
+        th { 
+            background-color: #f2f2f2; 
+        }
+        button { 
+            cursor: pointer; 
+            padding: 4px 8px; 
+            border-radius: 4px; 
+            border: 1px solid #ccc; 
+            background-color: #e9e9e9;
+        }
+        button:hover {
+            background-color: #dcdcdc;
+        }
+        button:disabled { 
+            cursor: not-allowed; 
+            opacity: 0.5; 
+        }
+        #edit-form, #bulk-add-section { 
+            margin-top: 15px; 
+            padding: 20px; 
+            border: 2px solid #ccc; 
+            border-radius: 10px; 
+            background-color: white; 
+        }
+        #edit-form h2, #bulk-add-section h2 { 
+            margin-top: 0; 
+        }
+        .form-grid { 
+            display: flex; 
+            flex-wrap: wrap; 
+            gap: 10px; 
+            align-items: flex-end; 
+        }
+        .form-field { 
+            display: flex; 
+            flex-direction: column; 
+        }
+        .form-field label { 
+            margin-bottom: 5px; 
+            font-weight: bold; 
+            font-size: 12px; 
+            display: flex; 
+            align-items: center; 
+            gap: 5px; 
+        }
+        .form-field input, .form-field select { 
+            padding: 8px; 
+            border: 1px solid #ccc; 
+            border-radius: 4px; 
+        }
         #form-frequency_khz, .bulk-frequency_khz { width: 8ch; }
         #form-station, .bulk-station { flex: 1; min-width: 150px; }
         #form-time_utc, .bulk-time_utc { width: 11ch; }
@@ -27,70 +94,153 @@
         #form-country_code, .bulk-country_code { width: 7ch; }
         #form-latlon, .bulk-latlon { width: 17ch; }
         #form-remarks, .bulk-remarks { flex: 1; min-width: 120px; }
-        .form-actions { margin-top: 20px; }
-        .controls { display: flex; gap: 20px; align-items: center; margin-bottom: 15px; padding: 10px; background-color: #eee; border-radius: 5px; }
-        .pagination { display: flex; gap: 10px; align-items: center; }
-        #bulk-add-container { margin-top: 15px; display: flex; flex-direction: column; gap: 15px; }
-        .bulk-add-item { padding: 15px; border: 1px solid #a2a2a2; border-radius: 8px; background-color: #fdfdfd; position: relative; }
-        .bulk-item-controls { position: absolute; top: 5px; right: 5px; display: flex; gap: 5px; }
-        .bulk-item-controls button { font-size: 14px; font-weight: bold; width: 24px; height: 24px; }
-        #mode-selection { margin-top: 30px; padding: 10px; background-color: #eee; border-radius: 5px; display: flex; gap: 10px; }
-        #mode-selection button.active { background-color: #007bff; color: white; border-color: #007bff; }
-
-        /* Tooltip Styles */
-        .tooltip {
-            position: relative;
-            display: inline-block;
-            cursor: help;
-            font-weight: bold;
-            color: #007bff;
+        .form-actions { 
+            margin-top: 20px; 
         }
-        .tooltip .tooltiptext {
-            visibility: hidden;
-            width: 220px;
-            background-color: #555;
-            color: #fff;
-            text-align: left;
-            border-radius: 6px;
-            padding: 8px;
-            position: absolute;
-            z-index: 1;
-            bottom: 125%;
-            left: 50%;
-            margin-left: -110px;
-            opacity: 0;
-            transition: opacity 0.3s;
-            font-weight: normal;
-            font-size: 11px;
+        .controls { 
+            display: flex; 
+            flex-wrap: wrap;
+            gap: 20px; 
+            align-items: center; 
+            margin-bottom: 15px; 
+            padding: 10px; 
+            background-color: #eee; 
+            border-radius: 5px; 
         }
-        .tooltip:hover .tooltiptext {
-            visibility: visible;
-            opacity: 1;
+        .pagination { 
+            display: flex; 
+            gap: 10px; 
+            align-items: center; 
+            margin-left: auto; /* Skyver paginering til høyre */
+        }
+        #bulk-add-container { 
+            margin-top: 15px; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 15px; 
+        }
+        .bulk-add-item { 
+            padding: 15px; 
+            border: 1px solid #a2a2a2; 
+            border-radius: 8px; 
+            background-color: #fdfdfd; 
+            position: relative; 
+        }
+        .bulk-item-controls { 
+            position: absolute; 
+            top: 5px; 
+            right: 5px; 
+            display: flex; 
+            gap: 5px; 
+        }
+        .bulk-item-controls button { 
+            font-size: 14px; 
+            font-weight: bold; 
+            width: 24px; 
+            height: 24px; 
+        }
+        #mode-selection { 
+            margin-top: 30px; 
+            padding: 10px; 
+            background-color: #eee; 
+            border-radius: 5px; 
+            display: flex; 
+            gap: 10px; 
+        }
+        #mode-selection button.active { 
+            background-color: #007bff; 
+            color: white; 
+            border-color: #007bff; 
+        }
+        .tooltip { 
+            position: relative; 
+            display: inline-block; 
+            cursor: help; 
+            font-weight: bold; 
+            color: #007bff; 
+        }
+        .tooltip .tooltiptext { 
+            visibility: hidden; 
+            width: 220px; 
+            background-color: #555; 
+            color: #fff; 
+            text-align: left; 
+            border-radius: 6px; 
+            padding: 8px; 
+            position: absolute; 
+            z-index: 1; 
+            bottom: 125%; 
+            left: 50%; 
+            margin-left: -110px; 
+            opacity: 0; 
+            transition: opacity 0.3s; 
+            font-weight: normal; 
+            font-size: 11px; 
+        }
+        .tooltip:hover .tooltiptext { 
+            visibility: visible; 
+            opacity: 1; 
+        }
+        #deleteBandButton {
+            background-color: #dc3545;
+            color: white;
+            border-color: #dc3545;
+        }
+        #deleteBandButton:hover {
+            background-color: #c82333;
+            border-color: #bd2130;
         }
     </style>
 </head>
 <body>
-
+<div class="container">
     <h1>Editor for AM-Station-Info user database</h1>
-    <p><input type="file" id="fileInput" accept=".json"></p>
+
+    <div class="file-loader">
+        <h3>Load existing JSON file</h3>
+        <p><input type="file" id="fileInput" accept=".json"></p>
+        
+        <hr>
+
+        <h3>Or, Parse and Load Aoki-style .txt file</h3>
+        <p>
+            Download the latest "shortwave schedule ziped file" 
+            <a href="https://www1.s2.starcat.ne.jp/ndxc/" target="_blank" rel="noopener noreferrer">here</a>.
+        </p>
+        <p>Select a file like nsa25.txt, ncb24.txt, etc. This will overwrite current data.</p>
+        <p><input type="file" id="aokiFileInput" accept=".txt"></p>
+    </div>
     
     <div class="controls">
         <div>
-            <label for="searchInput">Search:</label>
-            <input type="text" id="searchInput" placeholder="Search all fields...">
+            <label for="bandSelector">Band:</label>
+            <select id="bandSelector"></select>
         </div>
         <div>
-            <label for="itemsPerPageSelect">Show per page:</label>
+            <label for="searchColumn">Search in:</label>
+            <select id="searchColumn">
+                <option value="all">All Fields</option>
+                <option value="frequency_khz">Frequency</option>
+                <option value="station">Station</option>
+                <option value="language">Language</option>
+                <option value="location">Location</option>
+                <option value="country_code">Country</option>
+                <option value="remarks">Remarks</option>
+            </select>
+            <input type="text" id="searchInput" placeholder="Search...">
+        </div>
+        <div>
+            <button id="deleteBandButton" style="display:none;">Delete Band</button>
+        </div>
+        <div class="pagination">
+            <label for="itemsPerPageSelect">Show:</label>
             <select id="itemsPerPageSelect">
                 <option value="50">50</option>
                 <option value="100">100</option>
-                <option value="150">150</option>
                 <option value="200">200</option>
                 <option value="500">500</option>
                 <option value="all">All</option>
             </select>
-        </div>
-        <div class="pagination">
             <button id="prevButton">&lt; Previous</button>
             <span id="pageInfo"></span>
             <button id="nextButton">Next &gt;</button>
@@ -160,6 +310,7 @@
 
     <br>
     <button id="saveButton">Save Changes (Download File)</button>
+</div>
 
     <script>
         let stationData = [];
@@ -167,50 +318,161 @@
         let currentPage = 1;
         let currentFilename = 'user.json';
 
+        // --- Element selectors ---
         const fileInput = document.getElementById('fileInput');
+        const aokiFileInput = document.getElementById('aokiFileInput');
         const tableBody = document.querySelector("#stationTable tbody");
         const saveButton = document.getElementById('saveButton');
         const searchInput = document.getElementById('searchInput');
+        const searchColumnSelect = document.getElementById('searchColumn');
+        const bandSelector = document.getElementById('bandSelector');
+        const deleteBandButton = document.getElementById('deleteBandButton');
         const itemsPerPageSelect = document.getElementById('itemsPerPageSelect');
         const prevButton = document.getElementById('prevButton');
         const nextButton = document.getElementById('nextButton');
         const pageInfo = document.getElementById('pageInfo');
-        
         const modeSingleBtn = document.getElementById('mode-single-btn');
         const modeBulkBtn = document.getElementById('mode-bulk-btn');
-
         const editForm = document.getElementById('edit-form');
         const formTitle = document.getElementById('form-title');
         const formSubmitButton = document.getElementById('form-submit-button');
         const formCancelButton = document.getElementById('form-cancel-button');
         const editIndexInput = document.getElementById('edit-index');
-        
         const bulkAddSection = document.getElementById('bulk-add-section');
         const bulkAddContainer = document.getElementById('bulk-add-container');
         const bulkAddNewButton = document.getElementById('bulk-add-new-button');
         const bulkAddAllButton = document.getElementById('bulk-add-all-button');
         const bulkClearButton = document.getElementById('bulk-clear-button');
 
-        // Event Listeners
+        const bands = {
+            'All Bands': { min: 0, max: 99999 }, 'LW': { min: 153, max: 279 }, 'MW': { min: 531, max: 1701 },
+            '160m': { min: 1800, max: 2000 }, '120m': { min: 2300, max: 2495 }, '90m': { min: 3200, max: 3400 },
+            '75m': { min: 3900, max: 4000 }, '60m': { min: 4750, max: 5060 }, '49m': { min: 5900, max: 6200 },
+            '41m': { min: 7200, max: 7600 }, '31m': { min: 9400, max: 9900 }, '25m': { min: 11600, max: 12100 },
+            '22m': { min: 13570, max: 13870 }, '19m': { min: 15100, max: 15830 }, '16m': { min: 17480, max: 17900 },
+            '15m': { min: 18900, max: 19020 }, '13m': { min: 21450, max: 21850 }, '11m': { min: 25670, max: 26100 }
+        };
+
+        function populateBandSelector() {
+            for (const bandName in bands) {
+                const option = document.createElement('option');
+                option.value = bandName;
+                option.textContent = bandName;
+                bandSelector.appendChild(option);
+            }
+        }
+
+        // --- Event Listeners ---
         fileInput.addEventListener('change', handleFileLoad);
+        aokiFileInput.addEventListener('change', handleAokiFileLoad);
         searchInput.addEventListener('input', applyFilters);
+        searchColumnSelect.addEventListener('change', applyFilters);
+        bandSelector.addEventListener('change', handleBandChange);
+        deleteBandButton.addEventListener('click', handleDeleteBand);
         itemsPerPageSelect.addEventListener('change', () => { currentPage = 1; renderPage(); });
         prevButton.addEventListener('click', () => { if (currentPage > 1) { currentPage--; renderPage(); } });
         nextButton.addEventListener('click', () => { currentPage++; renderPage(); });
-        
         modeSingleBtn.addEventListener('click', () => switchMode('single'));
         modeBulkBtn.addEventListener('click', () => switchMode('bulk'));
-
         editForm.addEventListener('submit', handleFormSubmit);
         formCancelButton.addEventListener('click', resetForm);
-        
         bulkAddContainer.addEventListener('click', handleBulkItemClick);
-        bulkAddNewButton.addEventListener('click', () => {
-             const newItem = createBulkAddItem({}); // Add empty item
-             bulkAddContainer.appendChild(newItem);
-        });
+        bulkAddNewButton.addEventListener('click', () => { bulkAddContainer.appendChild(createBulkAddItem({})); });
         bulkAddAllButton.addEventListener('click', handleBulkAddAll);
         bulkClearButton.addEventListener('click', clearBulkItems);
+
+        // --- Aoki .txt file parser functionality ---
+
+        function parseAokiLine(line) {
+            if (!line.trim() || !/^\s*\d{2,5}/.test(line)) {
+                return null;
+            }
+            try {
+                const powerStr = line.substring(76, 80).trim();
+                return {
+                    "frequency_khz": parseInt(line.substring(0, 5).trim(), 10),
+                    "station": line.substring(6, 37).trim(),
+                    "time_utc": line.substring(38, 47).trim(),
+                    "days": line.substring(48, 55).trim(),
+                    "language": line.substring(56, 76).trim(),
+                    "power_kw": /^\d+$/.test(powerStr) ? parseInt(powerStr, 10) : null,
+                    "azimuth": line.substring(81, 84).trim(),
+                    "location": line.substring(85, 109).trim(),
+                    "country_code": line.substring(109, 112).trim(),
+                    "latlon": line.substring(113, 129).trim(),
+                    "remarks": line.substring(129).trim()
+                };
+            } catch (e) {
+                console.error(`Error parsing line: "${line.trim()}" -> ${e}`);
+                return null;
+            }
+        }
+
+        function handleAokiFileLoad(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const match = file.name.match(/^n[a-z]([a-z]\d{2})\.txt$/i);
+            
+            if (!match) {
+                alert("Invalid filename. Please select a file like 'nsa25.txt', 'ncb24.txt', etc.");
+                aokiFileInput.value = '';
+                return;
+            }
+            const newBaseName = `aoki-${match[1].toLowerCase()}`;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const content = e.target.result;
+                    const lines = content.split(/\r?\n/);
+                    const parsedData = lines.map(parseAokiLine).filter(item => item !== null);
+
+                    stationData = parsedData;
+                    currentFilename = `${newBaseName}.json`;
+                    
+                    alert(`Successfully parsed ${stationData.length} stations from ${file.name}.\nData is now loaded in the editor.\nThe save file will be named ${currentFilename}.`);
+                    
+                    applyFilters();
+                    aokiFileInput.value = '';
+                } catch (error) {
+                    alert("Could not read or parse the file. See console for details.");
+                    console.error(error);
+                }
+            };
+            reader.readAsText(file, 'ISO-8859-1');
+        }
+
+        // --- Core Application Functions ---
+
+        function handleBandChange() {
+            const selectedBand = bandSelector.value;
+            deleteBandButton.style.display = (selectedBand !== 'All Bands') ? 'inline-block' : 'none';
+            if (selectedBand !== 'All Bands') {
+                deleteBandButton.textContent = `Delete all from ${selectedBand}`;
+            }
+            applyFilters();
+        }
+
+        function handleDeleteBand() {
+            const selectedBand = bandSelector.value;
+            if (selectedBand === 'All Bands') return;
+
+            const band = bands[selectedBand];
+            const stationsInBandCount = stationData.filter(s => s.frequency_khz >= band.min && s.frequency_khz <= band.max).length;
+
+            if (stationsInBandCount === 0) {
+                alert(`There are no stations to delete in the ${selectedBand} band.`);
+                return;
+            }
+
+            if (confirm(`Are you sure you want to delete all ${stationsInBandCount} stations from the ${selectedBand} band? This cannot be undone.`)) {
+                stationData = stationData.filter(s => s.frequency_khz < band.min || s.frequency_khz > band.max);
+                bandSelector.value = 'All Bands';
+                handleBandChange();
+                alert(`${stationsInBandCount} stations deleted.`);
+            }
+        }
 
         function switchMode(mode) {
             if (mode === 'single') {
@@ -218,15 +480,13 @@
                 bulkAddSection.style.display = 'none';
                 modeSingleBtn.classList.add('active');
                 modeBulkBtn.classList.remove('active');
-            } else { // mode === 'bulk'
+            } else {
                 editForm.style.display = 'none';
                 bulkAddSection.style.display = 'block';
                 modeSingleBtn.classList.remove('active');
                 modeBulkBtn.classList.add('active');
-                
                 if (bulkAddContainer.children.length === 0) {
-                    const newItem = createBulkAddItem({});
-                    bulkAddContainer.appendChild(newItem);
+                    bulkAddContainer.appendChild(createBulkAddItem({}));
                 }
                 bulkAddSection.scrollIntoView({ behavior: 'smooth' });
             }
@@ -247,10 +507,29 @@
         }
 
         function applyFilters() {
+            stationData.sort((a, b) => a.frequency_khz - b.frequency_khz);
+
             const searchTerm = searchInput.value.toLowerCase();
-            filteredData = !searchTerm ? [...stationData] : stationData.filter(station => 
-                Object.values(station).some(value => String(value).toLowerCase().includes(searchTerm))
-            );
+            const searchColumn = searchColumnSelect.value;
+            const selectedBand = bandSelector.value;
+            
+            let tempFilteredData = [...stationData];
+
+            if (selectedBand && selectedBand !== 'All Bands') {
+                const band = bands[selectedBand];
+                tempFilteredData = tempFilteredData.filter(s => s.frequency_khz >= band.min && s.frequency_khz <= band.max);
+            }
+
+            if (searchTerm) {
+                tempFilteredData = tempFilteredData.filter(station => {
+                    if (searchColumn === 'all') {
+                        return Object.values(station).some(value => String(value).toLowerCase().includes(searchTerm));
+                    }
+                    return String(station[searchColumn]).toLowerCase().includes(searchTerm);
+                });
+            }
+
+            filteredData = tempFilteredData;
             currentPage = 1;
             renderPage();
         }
@@ -269,7 +548,7 @@
         }
 
         function displayStations(stationsToDisplay) {
-            const rowsHtml = stationsToDisplay.map((station) => {
+            tableBody.innerHTML = stationsToDisplay.map((station) => {
                 const originalIndex = stationData.findIndex(s => s === station);
                 return `
                     <tr>
@@ -283,8 +562,7 @@
                             <button onclick="deleteStation(${originalIndex})">Delete</button>
                         </td>
                     </tr>`;
-            });
-            tableBody.innerHTML = rowsHtml.join('');
+            }).join('');
         }
 
         function deleteStation(originalIndex) {
@@ -328,7 +606,7 @@
                 location: document.getElementById('form-location').value,
                 country_code: document.getElementById('form-country_code').value,
                 latlon: document.getElementById('form-latlon').value,
-                remarks: document.getElementById('form-remarks').value,
+                remarks: document.getElementById('form-remarks').value
             };
         }
 
@@ -341,7 +619,7 @@
                 stationData[parseInt(editIndex, 10)] = newStation;
             } else {
                 if (!newStation.frequency_khz || !newStation.station) {
-                    alert("Frequency and station name are required to add a new station.");
+                    alert("Frequency and station name are required.");
                     return;
                 }
                 stationData.push(newStation);
@@ -354,31 +632,18 @@
             const newItem = document.createElement('div');
             newItem.className = 'bulk-add-item';
             newItem.innerHTML = `
-                <div class="bulk-item-controls">
-                    <button class="clone-btn" title="Clone this item">+</button>
-                    <button class="remove-btn" title="Remove this item">X</button>
-                </div>
+                <div class="bulk-item-controls"><button class="clone-btn" title="Clone this item">+</button><button class="remove-btn" title="Remove this item">X</button></div>
                 <div class="form-grid">
                     <div class="form-field"><label>Frequency</label><input type="number" class="bulk-frequency_khz" value="${station.frequency_khz || ''}"></div>
                     <div class="form-field"><label>Station</label><input type="text" class="bulk-station" value="${station.station || ''}"></div>
                     <div class="form-field"><label>Time (UTC)</label><input type="text" class="bulk-time_utc" value="${station.time_utc || ''}"></div>
-                    <div class="form-field">
-                        <label>Days
-                            <span class="tooltip">(?)<span class="tooltiptext">Format: 1234567 (1=Sunday). Use a dot for days without transmission, e.g., 12.45..</span></span>
-                        </label>
-                        <input type="text" class="bulk-days" value="${station.days || ''}">
-                    </div>
+                    <div class="form-field"><label>Days<span class="tooltip">(?)<span class="tooltiptext">Format: 1234567 (1=Sunday).</span></span></label><input type="text" class="bulk-days" value="${station.days || ''}"></div>
                     <div class="form-field"><label>Language</label><input type="text" class="bulk-language" value="${station.language || ''}"></div>
                     <div class="form-field"><label>Power</label><input type="number" class="bulk-power_kw" value="${station.power_kw || ''}"></div>
                     <div class="form-field"><label>Azimuth</label><input type="text" class="bulk-azimuth" value="${station.azimuth || ''}"></div>
                     <div class="form-field"><label>Location</label><input type="text" class="bulk-location" value="${station.location || ''}"></div>
                     <div class="form-field"><label>Country</label><input type="text" class="bulk-country_code" value="${station.country_code || ''}"></div>
-                    <div class="form-field">
-                        <label>Lat/Lon
-                             <span class="tooltip">(?)<span class="tooltiptext">Format: DDMMSS(N/S)DDDMMSS(E/W), e.g., 332756N1301032E.</span></span>
-                        </label>
-                        <input type="text" class="bulk-latlon" value="${station.latlon || ''}">
-                    </div>
+                    <div class="form-field"><label>Lat/Lon<span class="tooltip">(?)<span class="tooltiptext">Format: DDMMSS(N/S)DDDMMSS(E/W)</span></span></label><input type="text" class="bulk-latlon" value="${station.latlon || ''}"></div>
                     <div class="form-field"><label>Remarks</label><input type="text" class="bulk-remarks" value="${station.remarks || ''}"></div>
                 </div>`;
             return newItem;
@@ -392,9 +657,6 @@
                 const stationToClone = {
                     frequency_khz: parentItem.querySelector('.bulk-frequency_khz').value || '',
                     station: parentItem.querySelector('.bulk-station').value,
-                    time_utc: '', // Clear this field
-                    days: '', // Clear this field
-                    language: '', // Clear this field
                     power_kw: parentItem.querySelector('.bulk-power_kw').value || '',
                     azimuth: parentItem.querySelector('.bulk-azimuth').value,
                     location: parentItem.querySelector('.bulk-location').value,
@@ -402,8 +664,7 @@
                     latlon: parentItem.querySelector('.bulk-latlon').value,
                     remarks: parentItem.querySelector('.bulk-remarks').value,
                 };
-                const newItem = createBulkAddItem(stationToClone);
-                parentItem.after(newItem);
+                parentItem.after(createBulkAddItem(stationToClone));
             } else if (target.classList.contains('remove-btn')) {
                 parentItem.remove();
             }
@@ -411,10 +672,8 @@
 
         function handleBulkAddAll() {
             const items = bulkAddContainer.querySelectorAll('.bulk-add-item');
-            if (items.length === 0) {
-                alert("No items to add.");
-                return;
-            }
+            if (items.length === 0) return alert("No items to add.");
+            
             let addedCount = 0;
             items.forEach(item => {
                 const newStation = {
@@ -438,7 +697,7 @@
             applyFilters();
             clearBulkItems();
             switchMode('single');
-            alert(`${addedCount} station(s) added to the main list.`);
+            alert(`${addedCount} station(s) added.`);
         }
 
         function clearBulkItems() {
@@ -446,13 +705,7 @@
         }
         
         function getTimestamp() {
-            const now = new Date();
-            const Y = now.getFullYear();
-            const M = String(now.getMonth() + 1).padStart(2, '0');
-            const D = String(now.getDate()).padStart(2, '0');
-            const h = String(now.getHours()).padStart(2, '0');
-            const m = String(now.getMinutes()).padStart(2, '0');
-            return `${Y}-${M}-${D}_${h}-${m}`;
+            return new Date().toISOString().slice(0, 16).replace('T', '_').replace(/:/g, '-');
         }
 
         saveButton.addEventListener('click', function() {
@@ -471,7 +724,8 @@
             URL.revokeObjectURL(url);
         });
 
-        // Initialize the view
+        // --- Initialization ---
+        populateBandSelector();
         switchMode('single');
 
     </script>
