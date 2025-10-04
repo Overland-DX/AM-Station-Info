@@ -1,4 +1,4 @@
-// AM-Station-Info v1.2 — Added Day/Night Terminator Overlay
+// AM-Station-Info v1.2.1
 // -----------------------------------------------------------------------
 
 (function() {
@@ -590,7 +590,7 @@ style.textContent = `
         .station-name {
           font-size: 1.2em;
         }
-        #af-list,
+        .am-station-info-active #af-list,
         #aoki-custom-tooltip.tooltiptext {
           display: none !important;
         }
@@ -726,19 +726,16 @@ function updateFrequencyMarker(freqKHz, activeProfile) {
 }
 
 	function ensureLeafletLoaded() {
-        // Sjekk om alt er lastet (inkludert SunCalc hvis grafen er på)
         if (window.L && window.L.terminator && window.arc && (window.SunCalc || !SHOW_PROPAGATION_GRAPH)) {
             return Promise.resolve();
         }
         if (leafletReady) return leafletReady;
 
-        // Start lastesekvensen
         let loadingPromise = loadCSS(LOCAL_LEAFLET_CSS)
             .then(() => loadJS(LOCAL_LEAFLET_JS))
             .then(() => loadJS(LOCAL_LEAFLET_TERMINATOR_JS))
             .then(() => loadJS(LOCAL_LEAFLET_ARC_JS));
         
-        // Legg kun til SunCalc i sekvensen HVIS grafen skal vises
         if (SHOW_PROPAGATION_GRAPH) {
             loadingPromise = loadingPromise.then(() => loadJS(LOCAL_LEAFLET_SUNCALC_JS));
         }
@@ -1112,8 +1109,37 @@ function displayStation() {
 
     function fetchAndDisplayAokiData(freqMHz){currentFreqKHz=Math.round(freqMHz*1000);const url=`${AOKI_API_URL}?freq=${currentFreqKHz}&lat=${qthLatitude}&lon=${qthLongitude}`;$.getJSON(url).done(data=>{if(currentMode!=='AM')return;if(data&&data.status==='success'&&data.stations&&data.stations.length>0){const newStationList=data.stations;if(!areStationListsEqual(stationList,newStationList)){currentIndex=0;}
     stationList=newStationList;displayStation();}else{stationList=[];const errorMessage=data&&data.message?data.message:'No active stations found.';$aokiContent.html(`<h4 style="padding-top:25px;margin:0;">${errorMessage}</h4>`);$navControls.hide();$aokiSource.hide();$afContainer.empty();}}).fail(()=>{if(currentMode!=='AM')return;stationList=[];$aokiContent.html('<h4 style="padding-top:25px;margin:0;">Error loading data.</h4>');$navControls.hide();$aokiSource.hide();$afContainer.empty();});}
-    function handleFrequencyChange(){clearTimeout(debounceTimer);debounceTimer=setTimeout(()=>{const freqText=$('#data-frequency').text();if(!freqText)return;const freqMHz=parseFloat(freqText);clearInterval(activityCheckInterval);if(freqMHz<=AM_MAX_FREQ_MHZ){if(currentMode!=='AM'){currentMode='AM';$stationContainer.hide();$aokiDisplay.show();}
-    fetchAndDisplayAokiData(freqMHz);activityCheckInterval=setInterval(function(){fetchAndDisplayAokiData(freqMHz);},10000);}else{if(currentMode!=='FM'){currentMode='FM';$aokiDisplay.hide();$stationContainer.show();$afContainer.empty();$tooltipText.hide().css('opacity',0);}}},100);}
+
+	function handleFrequencyChange() {
+		clearTimeout(debounceTimer);
+		debounceTimer = setTimeout(() => {
+			const freqText = $('#data-frequency').text();
+			if (!freqText) return;
+			const freqMHz = parseFloat(freqText);
+			clearInterval(activityCheckInterval);
+			if (freqMHz <= AM_MAX_FREQ_MHZ) {
+				if (currentMode !== 'AM') {
+				currentMode = 'AM';
+				$('body').addClass('am-station-info-active');
+				$stationContainer.hide();
+				$aokiDisplay.show();
+				}
+			fetchAndDisplayAokiData(freqMHz);
+			activityCheckInterval = setInterval(function() {
+			fetchAndDisplayAokiData(freqMHz);
+			}, 10000);
+		} else {
+		if (currentMode !== 'FM') {
+			currentMode = 'FM';
+			$('body').removeClass('am-station-info-active');
+			$aokiDisplay.hide();
+			$stationContainer.show();
+			$afContainer.empty();
+			$tooltipText.hide().css('opacity', 0);
+			}
+		}
+		}, 100);
+	}
 
 
     $aokiDisplay.off('click').on('click', e => {
@@ -1136,6 +1162,6 @@ function displayStation() {
         observer.observe(targetNode, { childList: true, subtree: true, characterData: true });
     }
     setTimeout(handleFrequencyChange, 1000);
-    console.log('AM-Station-Info v1.2 - Loaded and Ready.');
+    console.log('AM-Station-Info v1.2.1 - Loaded and Ready.');
   });
 })();

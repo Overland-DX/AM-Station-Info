@@ -1,6 +1,6 @@
 /*
-    AM Station Info Plugin v1.1
-    Server-side code
+    AM Station Info Plugin v1.2.1
+    Server-side code - Now reads from /databases/ directory
 */
 
 'use strict';
@@ -42,10 +42,10 @@ function parseLatLon(latlonStr) {
 }
 
 let stasjonsData = [];
-const pluginDirectory = __dirname;
+const dbDirectory = path.join(__dirname, 'databases');
 
 try {
-    const allFiles = fs.readdirSync(pluginDirectory);
+    const allFiles = fs.readdirSync(dbDirectory);
     
     const stationFiles = allFiles.filter(file => {
         const lowerCaseFile = file.toLowerCase();
@@ -53,50 +53,47 @@ try {
     });
 
     if (stationFiles.length === 0) {
-        logInfo(`${pluginName}: No station files found (e.g., aoki-a25.json or user.json).`);
+        logInfo(`${pluginName}: No station files found in the 'databases' directory.`);
     }
 
     for (const file of stationFiles) {
-        const filePath = path.join(pluginDirectory, file);
+        const filePath = path.join(dbDirectory, file);
         const fileContent = fs.readFileSync(filePath, 'utf8');
         const jsonData = JSON.parse(fileContent);
 
         const sourceName = path.basename(file, '.json').toUpperCase();
 
-const stationsFromFile = jsonData.map(station => {
-    const { latitude, longitude } = parseLatLon(station.latlon);
-    return {
-        frequency_khz: station.frequency_khz,
-        name: station.station,
-        time_utc: station.time_utc,
-        days_active: station.days,
-        language: station.language,
-        power_kw: station.power_kw,
-        location: station.location,
-        country: station.country_code,
-        latitude: latitude,
-        longitude: longitude,
-        source: sourceName,
-        azimuth: station.azimuth,
-        remarks: station.remarks
-    };
-});
+        const stationsFromFile = jsonData.map(station => {
+            const { latitude, longitude } = parseLatLon(station.latlon);
+            return {
+                frequency_khz: station.frequency_khz,
+                name: station.station,
+                time_utc: station.time_utc,
+                days_active: station.days,
+                language: station.language,
+                power_kw: station.power_kw,
+                location: station.location,
+                country: station.country_code,
+                latitude: latitude,
+                longitude: longitude,
+                source: sourceName,
+                azimuth: station.azimuth,
+                remarks: station.remarks
+            };
+        });
         
         stasjonsData = stasjonsData.concat(stationsFromFile);
         logInfo(`${pluginName}: Loaded ${stationsFromFile.length} stations from ${file}.`);
     }
 
-
 } catch (error) {
-    logError(`${pluginName}: An error occurred while loading station files.`, error);
+    if (error.code === 'ENOENT') {
+        logError(`${pluginName}: The 'databases' directory was not found. Please create it and add your station files.`);
+    } else {
+        logError(`${pluginName}: An error occurred while loading station files.`, error);
+    }
 }
-/*
-function hasValidCoords(stasjon) {
-  return Number.isFinite(stasjon.latitude) &&
-         Number.isFinite(stasjon.longitude) &&
-         stasjon.latitude !== 0 && stasjon.longitude !== 0;
-}
-*/
+
 function beregnAvstand(lat1, lon1, lat2, lon2) {
     if (isNaN(lat1) || isNaN(lon1) || isNaN(lat2) || isNaN(lon2)) return 0;
     const R = 6371;
@@ -137,76 +134,69 @@ endpointsRouter.get('/aoki-api-proxy', (req, res) => {
     const userLat = parseFloat(lat);
     const userLon = parseFloat(lon);
     
-const filtrerteStasjoner = stasjonsData.filter(stasjon => {
-  const freqMatch = stasjon.frequency_khz && Math.abs(stasjon.frequency_khz - requestFreq) <= 2;
-  const dayMatch  = stasjon.days_active && stasjon.days_active.includes(dayString);
-  const timeMatch = isTimeActive(stasjon.time_utc, nowInMinutes);
-  // return freqMatch && dayMatch && timeMatch && hasValidCoords(stasjon);
-  return freqMatch && dayMatch && timeMatch; // Ny
-});
+    const filtrerteStasjoner = stasjonsData.filter(stasjon => {
+      const freqMatch = stasjon.frequency_khz && Math.abs(stasjon.frequency_khz - requestFreq) <= 2;
+      const dayMatch  = stasjon.days_active && stasjon.days_active.includes(dayString);
+      const timeMatch = isTimeActive(stasjon.time_utc, nowInMinutes);
+      return freqMatch && dayMatch && timeMatch;
+    });
 
     if (filtrerteStasjoner.length === 0) return res.json({ status: 'success', message: 'No active stations found.', stations: [] });
 
-const resultat = filtrerteStasjoner.map(stasjon => {
-  // Sjekk om vi har gyldige koordinater før vi beregner avstand
-  const hasCoords = stasjon.latitude !== null && stasjon.longitude !== null;
-  const avstand = hasCoords 
-    ? beregnAvstand(userLat, userLon, stasjon.latitude, stasjon.longitude) 
-    : null; // Sett avstand til null hvis koordinater mangler
+    const resultat = filtrerteStasjoner.map(stasjon => {
+      const hasCoords = stasjon.latitude !== null && stasjon.longitude !== null;
+      const avstand = hasCoords 
+        ? beregnAvstand(userLat, userLon, stasjon.latitude, stasjon.longitude) 
+        : null;
 
-  const alternative_frequencies = stasjonsData
-    .filter(other =>
-      other.name === stasjon.name &&
-      other.frequency_khz !== stasjon.frequency_khz &&
-      other.days_active && other.days_active.includes(dayString) &&
-      isTimeActive(other.time_utc, nowInMinutes)
-    )
-    .map(alt => alt.frequency_khz);
+      const alternative_frequencies = stasjonsData
+        .filter(other =>
+          other.name === stasjon.name &&
+          other.frequency_khz !== stasjon.frequency_khz &&
+          other.days_active && other.days_active.includes(dayString) &&
+          isTimeActive(other.time_utc, nowInMinutes)
+        )
+        .map(alt => alt.frequency_khz);
 
-  const unikeAlternativer = [...new Set(alternative_frequencies)];
+      const unikeAlternativer = [...new Set(alternative_frequencies)];
 
-  return {
-    name: stasjon.name,
-    location: stasjon.location,
-    country: stasjon.country,
-    language: stasjon.language,
-    timeUTC: stasjon.time_utc,
-    power: stasjon.power_kw,
-    distance: avstand, // Bruk den nye 'avstand'-variabelen
-    source: stasjon.source,
-    alternative_frequencies: unikeAlternativer,
-    latitude: stasjon.latitude,
-    longitude: stasjon.longitude,
-    lat: stasjon.latitude,
-    lon: stasjon.longitude,
-    frequency: stasjon.frequency_khz,
-    days: stasjon.days_active,
-    azimuth: stasjon.azimuth,
-    remarks: stasjon.remarks
-  };
-});
+      return {
+        name: stasjon.name,
+        location: stasjon.location,
+        country: stasjon.country,
+        language: stasjon.language,
+        timeUTC: stasjon.time_utc,
+        power: stasjon.power_kw,
+        distance: avstand,
+        source: stasjon.source,
+        alternative_frequencies: unikeAlternativer,
+        latitude: stasjon.latitude,
+        longitude: stasjon.longitude,
+        lat: stasjon.latitude,
+        lon: stasjon.longitude,
+        frequency: stasjon.frequency_khz,
+        days: stasjon.days_active,
+        azimuth: stasjon.azimuth,
+        remarks: stasjon.remarks
+      };
+    });
 
-// Oppdatert sorteringsfunksjon som håndterer null-verdier
-resultat.sort((a, b) => {
-    const aHasDist = a.distance !== null;
-    const bHasDist = b.distance !== null;
+    resultat.sort((a, b) => {
+        const aHasDist = a.distance !== null;
+        const bHasDist = b.distance !== null;
 
-    if (aHasDist && bHasDist) {
-        // Begge har avstand, sorter normalt
-        return a.distance - b.distance;
-    } else if (aHasDist) {
-        // Kun 'a' har avstand, 'a' kommer først
-        return -1;
-    } else if (bHasDist) {
-        // Kun 'b' har avstand, 'b' kommer først
-        return 1;
-    } else {
-        // Ingen har avstand, behold rekkefølgen
-        return 0;
-    }
-});
+        if (aHasDist && bHasDist) {
+            return a.distance - b.distance;
+        } else if (aHasDist) {
+            return -1;
+        } else if (bHasDist) {
+            return 1;
+        } else {
+            return 0;
+        }
+    });
 
     res.json({ status: 'success', stations: resultat });
 });
 
-logInfo(`${pluginName}: AM-Station-Info endpoint initialized (v1.1 - Final Source Logic).`);
+logInfo(`${pluginName}: AM-Station-Info endpoint initialized (v1.2.1).`);
