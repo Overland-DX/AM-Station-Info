@@ -6,7 +6,7 @@
 
 The plugin utilizes a local database, ensuring that station information is always available without relying on an internet connection. It comes pre-loaded with the AOKI database, a well-regarded resource for broadcast information.
 
-The current bundled database is version **A25 (merged June and September 2025 editions)** from AOKI.
+The current bundled database is version ** B25 ** from AOKI.
 <br>
 
 ---
