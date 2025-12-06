@@ -1,5 +1,10 @@
 # AM-Station-Info Plugin for FM-DX-Webserver
 
+![Version](https://img.shields.io/badge/version-1.3-blue)
+![Compatibility](https://img.shields.io/badge/fm--dx--webserver-v1.3.12-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+
 ## About
 
 **AM-Station-Info** is a plugin for the [FM-DX-Webserver](https://github.com/NoobishSVK/fm-dx-webserver) that enhances your AM band exploration by providing detailed information for AM radio stations. It replaces the standard station ID panel with a comprehensive overview of the tuned station.
@@ -20,7 +25,7 @@ The current bundled database is version ** B25 ** from AOKI.
 This plugin displays the following information for AM stations:
 
 *   **Station Name:** The name of the broadcasting station.
-*   **Location:** The city and country [ROU] of the transmitter.
+*   **Location:** The city and country of the transmitter.
 *   **Distance:** The distance from your radio server to the transmitter site (in kilometers).
 *   **Language:** The language of the broadcast.
 *   **Broadcast Time:** The scheduled transmission times in UTC.

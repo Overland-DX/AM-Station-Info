@@ -1,6 +1,12 @@
 /*
-    AM Station Info Plugin v1.2.1
+    AM Station Info Plugin v1.3 (Server)
     Server-side code - Now reads from /databases/ directory
+    Updates: 
+    - MWList source name support
+    - Priority sorting: "0" power goes to bottom.
+    - Missing power ("N/A") sorts normally by distance.
+    - EXACT frequency matching (no +/- 2kHz tolerance)
+    - Fix: Stations with missing time in DB are treated as 24/7 active
 */
 
 'use strict';
@@ -49,7 +55,7 @@ try {
     
     const stationFiles = allFiles.filter(file => {
         const lowerCaseFile = file.toLowerCase();
-        return (lowerCaseFile.startsWith('aoki-') || lowerCaseFile.startsWith('user')) && lowerCaseFile.endsWith('.json');
+        return (lowerCaseFile.startsWith('aoki-') || lowerCaseFile.startsWith('user') || lowerCaseFile.includes('mwlist')) && lowerCaseFile.endsWith('.json');
     });
 
     if (stationFiles.length === 0) {
@@ -61,17 +67,31 @@ try {
         const fileContent = fs.readFileSync(filePath, 'utf8');
         const jsonData = JSON.parse(fileContent);
 
-        const sourceName = path.basename(file, '.json').toUpperCase();
+        let sourceName;
+        if (file.toLowerCase().includes('mwlist')) {
+            sourceName = "©MWLIST";
+        } else {
+            sourceName = path.basename(file, '.json').toUpperCase();
+        }
 
         const stationsFromFile = jsonData.map(station => {
             const { latitude, longitude } = parseLatLon(station.latlon);
+            
+            let rawPower = station.power_kw;
+            if (rawPower === undefined || rawPower === null) {
+                rawPower = station.erp;
+            }
+            if (rawPower === undefined) {
+                rawPower = null;
+            }
+
             return {
                 frequency_khz: station.frequency_khz,
                 name: station.station,
                 time_utc: station.time_utc,
                 days_active: station.days,
                 language: station.language,
-                power_kw: station.power_kw,
+                power_kw: rawPower, 
                 location: station.location,
                 country: station.country_code,
                 latitude: latitude,
@@ -83,7 +103,7 @@ try {
         });
         
         stasjonsData = stasjonsData.concat(stationsFromFile);
-        logInfo(`${pluginName}: Loaded ${stationsFromFile.length} stations from ${file}.`);
+        logInfo(`${pluginName}: Loaded ${stationsFromFile.length} stations from ${file} (Source: ${sourceName}).`);
     }
 
 } catch (error) {
@@ -104,7 +124,10 @@ function beregnAvstand(lat1, lon1, lat2, lon2) {
 }
 
 function isTimeActive(timeUTC, currentTimeInMinutes) {
-    if (!timeUTC || timeUTC.indexOf('-') === -1) return false;
+    // FIX: Hvis tid mangler eller er tom, antar vi at stasjonen sender 24/7 (for FMLIST/User DB)
+    if (!timeUTC || timeUTC.trim() === '') return true;
+    
+    if (timeUTC.indexOf('-') === -1) return false; 
     try {
         const [startStr, endStr] = timeUTC.split('-');
         const startHour = parseInt(startStr.substring(0, 2), 10);
@@ -135,7 +158,9 @@ endpointsRouter.get('/aoki-api-proxy', (req, res) => {
     const userLon = parseFloat(lon);
     
     const filtrerteStasjoner = stasjonsData.filter(stasjon => {
-      const freqMatch = stasjon.frequency_khz && Math.abs(stasjon.frequency_khz - requestFreq) <= 2;
+      // ENDRING: Kun nøyaktig frekvensmatch (ingen +/- 2 toleranse)
+      const freqMatch = stasjon.frequency_khz && stasjon.frequency_khz === requestFreq;
+      
       const dayMatch  = stasjon.days_active && stasjon.days_active.includes(dayString);
       const timeMatch = isTimeActive(stasjon.time_utc, nowInMinutes);
       return freqMatch && dayMatch && timeMatch;
@@ -166,7 +191,7 @@ endpointsRouter.get('/aoki-api-proxy', (req, res) => {
         country: stasjon.country,
         language: stasjon.language,
         timeUTC: stasjon.time_utc,
-        power: stasjon.power_kw,
+        power: stasjon.power_kw, 
         distance: avstand,
         source: stasjon.source,
         alternative_frequencies: unikeAlternativer,
@@ -181,7 +206,19 @@ endpointsRouter.get('/aoki-api-proxy', (req, res) => {
       };
     });
 
+    // Sortering: 0-effekt nederst, ellers distanse
     resultat.sort((a, b) => {
+        const isZeroPower = (p) => {
+            if (p === 0 || p === "0") return true;
+            return false;
+        };
+
+        const aIsZero = isZeroPower(a.power);
+        const bIsZero = isZeroPower(b.power);
+
+        if (aIsZero && !bIsZero) return 1; 
+        if (!aIsZero && bIsZero) return -1; 
+
         const aHasDist = a.distance !== null;
         const bHasDist = b.distance !== null;
 
@@ -199,4 +236,4 @@ endpointsRouter.get('/aoki-api-proxy', (req, res) => {
     res.json({ status: 'success', stations: resultat });
 });
 
-logInfo(`${pluginName}: AM-Station-Info endpoint initialized (v1.2.1).`);
+logInfo(`${pluginName}: AM-Station-Info endpoint initialized (v1.3).`);

@@ -1,1167 +1,1063 @@
-// AM-Station-Info v1.2.1
+// AM-Station-Info v1.3
 // -----------------------------------------------------------------------
 
-(function() {
-  $(document).ready(function() {
-    const AM_MAX_FREQ_MHZ = 27;
-    const AOKI_API_URL = '/aoki-api-proxy';
-	const SHOW_PROPAGATION_GRAPH = true;
+(() => {
+    'use strict';
 
-    let qthLatitude = '59.91';
-    let qthLongitude = '10.75';
-    let debounceTimer;
-    let stationList = [];
-    let currentIndex = 0;
-    let currentMode = 'FM';
-    let currentFreqKHz = 0;
-    let activityCheckInterval = null;
-	
+    // --- Configuration ---
+    const CONFIG = {
+        name: 'AM-Station-Info',
+        version: '1.3',
+        apiEndpoint: '/aoki-api-proxy',
+        auroraApi: 'https://api.auroras.live/v1/?type=all&lat=60.0&long=10.0&forecast=false',
+        maxFreq: 27
+    };
 
-    const $stationContainer = $('#data-station-container');
-    const $afContainer = $('#af-list');
-    if ($stationContainer.length === 0) return;
-    $stationContainer.parent().css('position', 'relative');
-
-    const $aokiDisplay = $('<div>', { id: 'aoki-plugin-display' });
-    const $aokiContent = $('<div>', { id: 'aoki-station-content' });
-    const $navControls = $('<div>', { id: 'aoki-nav-controls' });
-    const $prevButton = $('<button>').html('&lt;');
-    const $counter = $('<span>');
-    const $nextButton = $('<button>').html('&gt;');
-    const $aokiSource = $('<span>', { id: 'aoki-source-display' });
-    $navControls.append($prevButton, $counter, $nextButton).appendTo($aokiDisplay);
-    $aokiDisplay.append($aokiContent, $aokiSource);
-
-    const tooltipHTML = 'This panel only shows information about available<br>stations in the database, this is not RDS data.<br><br>Click to open local map.';
-    const $tooltipText = $('<span>', { id: 'aoki-station-info-tooltip', class: 'aoki-tooltiptext' }).html(tooltipHTML);
-    $('body').append($tooltipText);
-    $tooltipText.hide();
-
-function showTooltip() {
-    const rect = $aokiDisplay[0].getBoundingClientRect();
-    $tooltipText.css({
-        top: `${rect.top - 10}px`,
-        left: `${rect.left + (rect.width / 2)}px`,
-        opacity: 0
-    }).show();
-    setTimeout(() => { $tooltipText.css('opacity', 1); }, 10);
-}
-
-function hideTooltip() {
-    $tooltipText.css('opacity', 0);
-    setTimeout(() => {
-        if ($tooltipText.css('opacity') === '0') {
-            $tooltipText.hide();
-        }
-    }, 300); 
-}
-
-$aokiDisplay.on('mouseenter', showTooltip).on('mouseleave', hideTooltip);
-
-$aokiDisplay.on('click', function(e) {
-    e.stopPropagation(); 
-    
-    if ($tooltipText.is(':visible')) {
-        hideTooltip();
-    } else {
-        showTooltip();
-    }
-});
-
-$(document).on('click', function(e) {
-    if (!$aokiDisplay.is(e.target) && $aokiDisplay.has(e.target).length === 0) {
-        if ($tooltipText.is(':visible')) {
-            hideTooltip();
-        }
-    }
-});
-
-    const style = document.createElement('style');
-style.textContent = `
-      /* 
-      ==============================================
-      ==  1. AOKI PLUGIN DISPLAY (MAIN INFO BOX)  ==
-      ==============================================
-      */
-      
-      #aoki-plugin-display {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: var(--color-1);
-        z-index: 1010;
-        color: var(--color-text);
-        box-sizing: border-box;
-        display: none;
-        text-align: center;
-        border-radius: 15px;
-        padding: 0px 10px;
-        cursor: pointer;
-      }
-      
-      #aoki-station-content {
-        display: flex;
-        flex-direction: column;
-        justify-content: flex-start;
-        height: 100%;
-      }
-      
-      .station-name {
-        margin-top: 0;
-        font-size: 1.4em;
-        font-weight: bold;
-        text-transform: uppercase;
-        margin-bottom: 1px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        color: var(--color-4);
-      }
-      
-      .station-location {
-        font-size: 0.9em;
-        margin-bottom: 0px;
-      }
-      
-      .station-meta {
-        font-size: 0.9em;
-        line-height: 1.4;
-      }
-      
-      #aoki-nav-controls {
-        position: absolute;
-        bottom: 2px;
-        right: 5px;
-        display: flex;
-        align-items: center;
-        gap: 2px;
-        font-size: 11px;
-        cursor: default;
-      }
-      
-      #aoki-nav-controls button {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 20px;
-        height: 20px;
-        background: none;
-        border: 1px solid var(--color-text);
-        border-radius: 5px;
-        color: var(--color-text);
-        font-size: 11px;
-        line-height: 1;
-        cursor: pointer;
-        opacity: 0.6;
-      }
-      
-      #aoki-nav-controls button:hover {
-        opacity: 1;
-      }
-      
-      #aoki-source-display {
-        position: absolute;
-        bottom: 0px;
-        left: 5px;
-        font-size: 11px;
-        opacity: 0.6;
-        cursor: default;
-      }
-      
-      .alt-freq-list {
-        height: calc(100% - 50px);
-        overflow-y: auto;
-        font-size: 14px;
-      }
-      
-      .alt-freq-item {
-        padding: 4px 0;
-        cursor: pointer;
-        border-radius: 5px;
-      }
-      
-      .alt-freq-item:hover {
-        background-color: rgba(255, 255, 255, 0.1);
-      }
-      
-      #aoki-station-info-tooltip.aoki-tooltiptext {
-        position: fixed;
-        transform: translate(-50%, -100%);
-        z-index: 1;
-        background-color: var(--color-2);
-        border: 2px solid var(--color-3);
-        color: var(--color-text);
-        text-align: center;
-        font-size: 14px;
-        border-radius: 15px;
-        padding: 8px 15px;
-        opacity: 0;
-        transition: opacity 0.3s ease;
-        pointer-events: none;
-        white-space: nowrap;
-      }
-
-      /* 
-      ==================================
-      ==  2. MAP MODAL & COMPONENTS   ==
-      ==================================
-      */
-      
-      #aoki-map-modal {
-        position: fixed;
-        inset: 0;
-        z-index: 99998;
-        display: none;
-      }
-      
-      #aoki-map-modal .aoki-map-backdrop {
-        position: absolute;
-        inset: 0;
-        background: rgba(0, 0, 0, .6);
-        backdrop-filter: blur(10px);
-      }
-      
-      #aoki-map-modal .aoki-map-dialog {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        display: flex;
-        flex-direction: column;
-        width: 75vw;
-        height: 80vh;
-        max-width: 1400px;
-        max-height: 850px;
-        background: var(--color-main);
-        border-radius: 15px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
-        overflow: hidden;
-        z-index: 99999;
-      }
-      
-      .aoki-map-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        height: 45px;
-        padding: 5px 5px;
-        background-color: var(--color-2);
-        border-bottom: 1px solid var(--color-4);
-        flex-shrink: 0;
-      }
-      
-      .aoki-map-title {
-        font-size: 20px;
-        font-weight: bold;
-        color: var(--color-main-bright);
-      }
-      
-      .aoki-map-close {
-        width: 100px;
-        height: 34px;
-        border-radius: 15px;
-        
-        background-color: var(--color-3);
-        border: 1px solid var(--color-4);
-        
-        color: var(--color-main-bright);
-        font-size: 20px;
-        font-weight: normal;
-        
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        line-height: 1;
-        
-        cursor: pointer;
-        transition: 0.3s ease background-color, 0.3s ease color;
-      }
-      
-      .aoki-map-close:hover {
-        background-color: var(--color-5);
-        color: var(--color-1);
-      }
-
-      .aoki-map-footer {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        height: 45px;
-        padding: 5px 10px;
-        background-color: var(--color-2);
-        border-top: 1px solid var(--color-4);
-        flex-shrink: 0;
-        gap: 10px;
-      }
-
-      .footer-data-left, .footer-data-right {
-        flex: 0 0 100px;
-      }
-
-      #propagation-graph-container {
-        flex-grow: 1;
-        position: relative;
-        height: 100%;
-      }
-
-      #propagation-graph {
-        display: flex;
-        width: 100%;
-        height: 20px;
-        border-radius: 5px;
-        overflow: hidden;
-        border: 1px solid rgba(255,255,255,0.2);
-        position: absolute;
-        bottom: 0;
-      }
-
-      .graph-zone {
-        height: 100%;
-        transition: width 0.5s ease; 
-      }
-
-      #graph-red-luf { background-color: #e74c3c; }
-      #graph-green-window { background-color: #2ecc71; }
-      #graph-yellow-muf { background-color: #f1c40f; }
-
-      .graph-labels {
-        display: flex;
-        justify-content: space-between;
-        font-size: 10px;
-        color: var(--color-text);
-        opacity: 0.7;
-        padding: 0 2px;
-      }
-	  #graph-markers {
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        height: 20px; 
-        pointer-events: none;
-      }
-
-      .marker {
-        position: absolute;
-        height: 100%;
-        width: 1px;
-        background-color: rgba(0, 0, 0, 0.2);
-      }
-
-      .marker.label {
-        height: 150%; 
-        background-color: rgba(0, 0, 0, 0.4);
-      }
-      
-      .marker.label::after {
-        content: attr(data-label); 
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%); 
-        font-size: 9px;
-        color: var(--color-text);
-        opacity: 0.7;
-      }
-      #graph-red-luf { background-color: #c0392b; }  
-      #graph-yellow-low { background-color: #f1c40f; } 
-      #graph-green-optimal { background-color: #2ecc71; } 
-      #graph-yellow-high { background-color: #f1c40f; }  
-      #graph-red-muf { background-color: #c0392b; }  
-
-	  #frequency-pointer-container,
-      #frequency-pointer-container-bottom {
-        position: absolute;
-        left: 0;
-        width: 100%;
-        height: 6px;
-        z-index: 2;
-        pointer-events: none;
-      }
-
-      #frequency-pointer-container {
-        top: 9px;
-      }
-      
-      #frequency-pointer-container-bottom {
-        bottom: -5px;
-      }
-
-      #frequency-pointer-top,
-      #frequency-pointer-bottom {
-        position: absolute;
-        width: 0; 
-        height: 0; 
-        border-left: 6px solid transparent;
-        border-right: 6px solid transparent;
-        transform: translateX(-50%);
-        display: none;
-      }
-
-      #frequency-pointer-top {
-        border-top: 6px solid var(--color-4); /* Peker nedover */
-      }
-
-      #frequency-pointer-bottom {
-        border-bottom: 6px solid var(--color-4); /* Peker oppover */
-      }
-
-      /* 
-      ==================================
-      ==  3. MAP CONTENT & OVERLAYS   ==
-      ==================================
-      */
-      
-      #aoki-map {
-        width: 100%;
-        height: 100%;
-        flex-grow: 1;
-      }
-      
-      .leaflet-top.leaflet-right .leaflet-control-zoom {
-        margin-top: 12px;
-        margin-right: 12px;
-      }
-
-      .country-label {
-        background: transparent;
-        border: none;
-        box-shadow: none;
-        color: rgba(0, 0, 0, 0.6);
-        font-size: 14px;
-        font-weight: bold;
-        text-shadow: 0 0 2px #fff, 0 0 2px #fff;
-        pointer-events: none;
-        display: none;
-      }
-
-      .leaflet-zoom-3 .country-label,
-      .leaflet-zoom-4 .country-label,
-      .leaflet-zoom-5 .country-label {
-        display: block;
-      }
-      
-      .ne-place-label span {
-        font-size: 12px;
-        color: #f0f0f0;
-        text-shadow: 0 1px 3px rgba(0, 0, 0, .9);
-        white-space: nowrap;
-        user-select: none;
-        pointer-events: none;
-      }
-      
-      #aoki-map-infobox {
-        position: absolute;
-        top: 60px;
-        left: 15px;
-        width: 280px;
-        background: var(--color-1-transparent);
-        border: 1px solid #777;
-        border-radius: 8px;
-        z-index: 100000;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, .5);
-        color: var(--color-text);
-        font-family: sans-serif;
-        font-size: 14px;
-        pointer-events: none;
-      }
-      
-      #aoki-map-infobox > * {
-        pointer-events: auto;
-      }
-      
-      #aoki-map-infobox .info-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 8px 12px;
-        background: var(--color-2);
-        border-bottom: 1px solid #777;
-        border-radius: 8px 8px 0 0;
-        cursor: pointer;
-      }
-      
-      #aoki-map-infobox .info-header h4 {
-        margin: 0;
-        font-size: 16px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      
-      #aoki-map-infobox .info-toggle {
-        padding: 0 5px;
-        font-size: 20px;
-        font-weight: bold;
-      }
-      
-      #aoki-map-infobox .info-content {
-        display: none;
-        padding: 12px;
-        max-height: 400px;
-        overflow-y: auto;
-      }
-      
-      #aoki-map-infobox.is-open .info-content {
-        display: block;
-      }
-      
-      #aoki-map-infobox .info-content p {
-        margin: 0 0 8px 0;
-        line-height: 1.4;
-      }
-      
-      #aoki-map-infobox .info-content strong {
-        display: inline-block;
-        min-width: 90px;
-        color: var(--color-main-bright);
-      }
-
-      .leaflet-control-zoom {
-        border: none !important;
-        box-shadow: 0 1px 5px rgba(0,0,0,0.4);
-      }
-
-      .leaflet-control-zoom-in,
-      .leaflet-control-zoom-out {
-        background-color: var(--color-2-transparent) !important;
-        color: var(--color-main-bright) !important;
-        transition: background-color 0.2s ease;
-      }
-
-      .leaflet-control-zoom-in:hover,
-      .leaflet-control-zoom-out:hover {
-        background-color: var(--color-4-transparent) !important;
-      }
-
-      .leaflet-control-zoom-in {
-        border-top-left-radius: 10px !important;
-        border-top-right-radius: 10px !important;
-        border-bottom-left-radius: 0;
-        border-bottom-right-radius: 0;
-      }
-
-      .leaflet-control-zoom-out {
-        border-bottom-left-radius: 10px !important;
-        border-bottom-right-radius: 10px !important;
-        border-top-left-radius: 0;
-        border-top-right-radius: 0;
-        border-top: none;
-      }
-
-      /* 
-      ====================================
-      ==  4. RESPONSIVE DESIGN (MEDIA)  ==
-      ====================================
-      */
-      
-	@media (max-width: 700px) {
-        #aoki-map-modal .aoki-map-dialog {
-          box-sizing: border-box;
-
-          top: 10px;
-          right: 10px;
-          bottom: 10px;
-          left: 10px;
-          
-          width: 95vw;
-          height: 75vh;
-          transform: none;
-        }
-
-        #aoki-map-infobox {
-          width: 240px;
-          left: 10px;
-          top: 55px;
-        }
-
-        .aoki-map-title {
-          font-size: 18px;
-        }
-
-        .aoki-map-close {
-          width: 80px;
-        }
-      }
-      
-      @media (max-width: 600px) {
-        .station-name {
-          font-size: 1.2em;
-        }
-        .am-station-info-active #af-list,
-        #aoki-custom-tooltip.tooltiptext {
-          display: none !important;
-        }
-      }
-    `;
-
-    document.head.appendChild(style);
-    $stationContainer.parent().append($aokiDisplay);
-    $aokiDisplay.on('mouseenter mouseover mousemove', e => e.stopPropagation());
-
-	const $mapModal = $(`
-      <div id="aoki-map-modal">
-        <div class="aoki-map-backdrop"></div>
-        <div class="aoki-map-dialog">
-          <div class="aoki-map-header">
-            <span class="aoki-map-title">Station Map</span>
-            <button class="aoki-map-close" aria-label="Close">Close</button>
-          </div>
-          <div id="aoki-map"></div> 
-          
-          ${SHOW_PROPAGATION_GRAPH ? `
-            <div class="aoki-map-footer">
-              <div class="footer-data-left"></div>
-              <div id="propagation-graph-container">
-                <div id="frequency-pointer-container">
-                  <div id="frequency-pointer-top"></div>
-                </div>
-                <div class="graph-labels">
-                  <span>0 MHz</span>
-                  <span>27 MHz</span>
-                </div>
-                <div id="propagation-graph">
-                  <div id="graph-red-luf" class="graph-zone"></div>
-                  <div id="graph-yellow-low" class="graph-zone"></div>
-                  <div id="graph-green-optimal" class="graph-zone"></div>
-                  <div id="graph-yellow-high" class="graph-zone"></div>
-                  <div id="graph-red-muf" class="graph-zone"></div>
-                  <div id="frequency-line"></div>
-                </div>
-                <div id="frequency-pointer-container-bottom">
-                    <div id="frequency-pointer-bottom"></div>
-                </div>
-                <div id="graph-markers"></div>
-              </div>
-              <div class="footer-data-right"></div>
-            </div>
-          ` : ''}
-
-        </div>
-      </div>
-    `);
-
-
-    $('body').append($mapModal);
-
-    const LOCAL_LEAFLET_CSS = '/assets/leaflet/leaflet.css';
-    const LOCAL_LEAFLET_JS = '/assets/leaflet/leaflet.js';
-    const LOCAL_LEAFLET_TERMINATOR_JS = '/assets/leaflet/L.Terminator.js';
-	const LOCAL_LEAFLET_ARC_JS = '/assets/leaflet/arc.js';
-	const LOCAL_LEAFLET_SUNCALC_JS = '/assets/leaflet/SunCalc.js';
-
-    const dynamicProfileModel = [
-
-        { event: 'nadir',      offsetHours: 0,    luf: 0,    greenStart: 0,    greenEnd: 9,    muf: 11 }, // Midt på natten
-        { event: 'sunrise',    offsetHours: -1.5, luf: 0,    greenStart: 0.05, greenEnd: 8,    muf: 12 }, // 1.5t FØR soloppgang
-        { event: 'sunrise',    offsetHours: 0,    luf: 0.2,  greenStart: 2,    greenEnd: 10,   muf: 16 }, // Nøyaktig soloppgang
-        { event: 'sunrise',    offsetHours: 1.5,  luf: 4,    greenStart: 8,    greenEnd: 16,   muf: 20 }, // 1.5t ETTER soloppgang
-        { event: 'solarNoon',  offsetHours: 0,    luf: 7,    greenStart: 12,   greenEnd: 18,   muf: 22 }, // Når solen er på sitt høyeste
-        { event: 'solarNoon',  offsetHours: 3,    luf: 6,    greenStart: 10,   greenEnd: 17,   muf: 21 }, // 3t ETTER høyeste punkt (ettermiddag)
-        { event: 'sunset',     offsetHours: -1,   luf: 2,    greenStart: 7,    greenEnd: 16,   muf: 18 }, // 1t FØR solnedgang
-        { event: 'sunset',     offsetHours: 0,    luf: 0,    greenStart: 2,    greenEnd: 15,   muf: 18 }, // Nøyaktig solnedgang
-        { event: 'sunset',     offsetHours: 2,    luf: 0,    greenStart: 0,    greenEnd: 14,   muf: 16 }  // 2t ETTER solnedgang
+    // V1 Propagation Model
+    const DYNAMIC_PROFILE_MODEL = [
+        { event: 'nadir',      offsetHours: 0,    luf: 0,    greenStart: 0,    greenEnd: 9,    muf: 11 },
+        { event: 'sunrise',    offsetHours: -1.5, luf: 0,    greenStart: 0.05, greenEnd: 8,    muf: 12 },
+        { event: 'sunrise',    offsetHours: 0,    luf: 0.2,  greenStart: 2,    greenEnd: 10,   muf: 16 },
+        { event: 'sunrise',    offsetHours: 1.5,  luf: 4,    greenStart: 8,    greenEnd: 16,   muf: 20 },
+        { event: 'solarNoon',  offsetHours: 0,    luf: 7,    greenStart: 12,   greenEnd: 18,   muf: 22 },
+        { event: 'solarNoon',  offsetHours: 3,    luf: 6,    greenStart: 10,   greenEnd: 17,   muf: 21 },
+        { event: 'sunset',     offsetHours: -1,   luf: 2,    greenStart: 7,    greenEnd: 16,   muf: 18 },
+        { event: 'sunset',     offsetHours: 0,    luf: 0,    greenStart: 2,    greenEnd: 15,   muf: 18 },
+        { event: 'sunset',     offsetHours: 2,    luf: 0,    greenStart: 0,    greenEnd: 14,   muf: 16 }
     ];
 
-    function loadCSS(href) { return new Promise((res, rej) => { const l=document.createElement('link');l.rel='stylesheet';l.href=href;l.onload=()=>res();l.onerror=()=>rej();document.head.appendChild(l); }); }
-    function loadJS(src) { return new Promise((res, rej) => { const s=document.createElement('script');s.src=src;s.onload=()=>res();s.onerror=()=>rej();document.head.appendChild(s); }); }
-
-    let leafletReady = null;
-
-function createGraphMarkers() {
-    const container = $('#graph-markers');
-    if (container.children().length > 0) return; 
-
-    let markersHTML = '';
-    const maxFreq = 27;
-
-    for (let i = 1; i < maxFreq; i++) {
-        const percentPosition = (i / maxFreq) * 100;
-        let className = 'marker';
-        let dataAttribute = '';
-
-        if (i % 5 === 0) {
-            className += ' label';
-            dataAttribute = `data-label="${i}"`;
+    /**
+     * SETTINGS MANAGER
+     */
+    class SettingsManager {
+        constructor() {
+            this.storageKey = 'am-station-settings-v2';
+            this._settings = this._loadSettings();
+            this.defaults = {
+                selectedList: 'all',
+                freqMargin: 0,
+                useMiles: false,
+                showKp: true,
+                showTerminator: true,
+                showPath: true,
+                showGraph: true,
+                extendedInfo: true
+            };
         }
-        
-        markersHTML += `<div class="${className}" style="left: ${percentPosition}%;" ${dataAttribute}></div>`;
-    }
-    container.html(markersHTML);
-}
-
-function updateFrequencyMarker(freqKHz, activeProfile) {
-    const freqMHz = freqKHz / 1000;
-    const maxFreq = 27;
-
-    if (freqMHz <= 0 || freqMHz > maxFreq) {
-        $('#frequency-pointer-top, #frequency-pointer-bottom, #frequency-line').hide();
-        return;
-    }
-
-    const percentPosition = (freqMHz / maxFreq) * 100;
-
-    $('#frequency-pointer-top').css('left', `${percentPosition}%`).show();
-    $('#frequency-pointer-bottom').css('left', `${percentPosition}%`).show();
-    $('#frequency-line').css('left', `${percentPosition}%`).show();
-
-    const { luf, muf, greenStartsAt, greenEndsAt } = activeProfile;
-    const usableBandwidth = muf - luf;
-    const yellowLowEnd = luf + (usableBandwidth * greenStartsAt);
-    const greenEnd = luf + (usableBandwidth * greenEndsAt);
-    
-    let lineColor = '#ff0000';
-
-    if (freqMHz < luf || freqMHz > muf) {
-        lineColor = '#ffffff';
-    } else if (freqMHz < yellowLowEnd || freqMHz > greenEnd) {
-        lineColor = '#3498db';
-    } else {
-        lineColor = '#c0392b';
-    }
-
-    $('#frequency-line').css('background-color', lineColor);
-}
-
-	function ensureLeafletLoaded() {
-        if (window.L && window.L.terminator && window.arc && (window.SunCalc || !SHOW_PROPAGATION_GRAPH)) {
-            return Promise.resolve();
+        _loadSettings() {
+            try { return JSON.parse(localStorage.getItem(this.storageKey)) || {}; } catch (e) { return {}; }
         }
-        if (leafletReady) return leafletReady;
-
-        let loadingPromise = loadCSS(LOCAL_LEAFLET_CSS)
-            .then(() => loadJS(LOCAL_LEAFLET_JS))
-            .then(() => loadJS(LOCAL_LEAFLET_TERMINATOR_JS))
-            .then(() => loadJS(LOCAL_LEAFLET_ARC_JS));
-        
-        if (SHOW_PROPAGATION_GRAPH) {
-            loadingPromise = loadingPromise.then(() => loadJS(LOCAL_LEAFLET_SUNCALC_JS));
+        _saveSettings() {
+            localStorage.setItem(this.storageKey, JSON.stringify(this._settings));
         }
-        
-        leafletReady = loadingPromise;
-        return leafletReady;
-    }
-
-    const COUNTRIES_GEOJSON = '/assets/world_countries_50m.geojson';
-    const PLACES_GEOJSON = '/assets/places_rich.geojson';
-    let leafletMap = null, currentLine = null, qthMarker = null, txMarker = null, basemapLoaded = false;
-    let mapNeedsResize = false;
-    let terminatorLayer = null;
-    let terminatorInterval = null;
-
-function getDynamicProfile() {
-    const now = new Date();
-    const qthLat = parseFloat(qthLatitude);
-    const qthLon = parseFloat(qthLongitude);
-
-    const sunTimes = SunCalc.getTimes(now, qthLat, qthLon);
-
-    const timeline = dynamicProfileModel.map(point => {
-        const eventTime = sunTimes[point.event];
-        const eventHours = eventTime.getHours() + eventTime.getMinutes() / 60;
-        const time = eventHours + point.offsetHours;
-        return { ...point, time };
-    }).sort((a, b) => a.time - b.time);
-
-    const firstPoint = { ...timeline[0], time: timeline[0].time - 24 };
-    const lastPoint = { ...timeline[timeline.length - 1], time: timeline[timeline.length - 1].time + 24 };
-    timeline.unshift(firstPoint);
-    timeline.push(lastPoint);
-
-    const currentTime = now.getHours() + now.getMinutes() / 60;
-
-    let before = timeline[0];
-    let after = timeline[timeline.length - 1];
-
-    for (let i = 0; i < timeline.length; i++) {
-        if (timeline[i].time <= currentTime) {
-            before = timeline[i];
+        get(key) {
+            return this._settings[key] !== undefined ? this._settings[key] : this.defaults[key];
         }
-        if (timeline[i].time >= currentTime) {
-            after = timeline[i];
-            break;
+        set(key, value) {
+            this._settings[key] = value;
+            this._saveSettings();
         }
     }
 
-    const timeRange = after.time - before.time;
-    const timeProgress = (currentTime - before.time) / timeRange;
+    /**
+     * SETTINGS MODAL UI
+     */
+    class SettingsModal {
+        constructor(settingsManager, onSaveCallback) {
+            this.settings = settingsManager;
+            this.onSave = onSaveCallback;
+            this.overlayId = 'am-settings-overlay';
+            this._createModal();
+        }
 
-    if (!isFinite(timeProgress)) { 
-        return {
-            luf: before.luf, muf: before.muf,
-            greenStartsAt: (before.greenStart - before.luf) / (before.muf - before.luf || 1),
-            greenEndsAt: (before.greenEnd - before.luf) / (before.muf - before.luf || 1)
-        };
+        _createModal() {
+            if ($(`#${this.overlayId}`).length) return;
+            
+            const mkSwitch = (id, label) => `
+                <div class="am-switch-row">
+                    <span class="am-switch-text">${label}</span>
+                    <div class="switch">
+                        <input type="checkbox" id="${id}">
+                        <label for="${id}"></label>
+                    </div>
+                </div>
+            `;
+
+            const html = `
+            <div id="${this.overlayId}" class="am-native-modal" style="display:none;">
+                <div class="am-native-content">
+                    
+                    <!-- Header -->
+                    <div class="am-native-header">
+                        <span class="am-native-title">AM Station Settings</span>
+                        <div class="am-native-close">&times;</div>
+                    </div>
+                    
+                    <!-- Scrollable Body -->
+                    <div class="am-native-body">
+                        
+                        <fieldset class="am-fieldset">
+                            <legend>Database & Units</legend>
+                            
+                            <div class="am-row">
+                                <label>Database List</label>
+                                <select id="am-set-list" class="am-native-input">
+                                    <option value="all">All Lists</option>
+                                    <option value="aoki">Aoki Only</option>
+                                    <option value="user">User DB Only</option>
+                                    <option value="mwlist">MWList Only</option>
+                                </select>
+                            </div>
+                            
+                            <div class="am-row">
+                                <label>Freq Margin (+/- kHz)</label>
+                                <input type="number" id="am-set-margin" class="am-native-input" min="0" max="10">
+                            </div>
+                            
+                            <div class="am-row">
+                                <label>Distance Unit</label>
+                                <select id="am-set-unit" class="am-native-input">
+                                    <option value="km">Kilometers (km)</option>
+                                    <option value="mi">Miles (mi)</option>
+                                </select>
+                            </div>
+                        </fieldset>
+
+                        <fieldset class="am-fieldset">
+                            <legend>Map & Visuals</legend>
+                            ${mkSwitch('am-set-kp', 'Show Kp Index')}
+                            ${mkSwitch('am-set-terminator', 'Show Day/Night Terminator')}
+                            ${mkSwitch('am-set-path', 'Show Signal Path (Line)')}
+                            ${mkSwitch('am-set-graph', 'Show Prop. Graph (Footer)')}
+                            ${mkSwitch('am-set-extended', 'Auto-open Info Box')}
+                        </fieldset>
+
+                    </div>
+                    
+                    <!-- Fixed Footer -->
+                    <div class="am-native-footer">
+                        <button id="am-save-btn" class="am-native-button">Save & Close</button>
+                    </div>
+
+                </div>
+            </div>`;
+
+            $('body').append(html);
+            this.$el = $(`#${this.overlayId}`);
+            
+            this.$el.find('.am-native-close').click(() => this.close());
+            this.$el.find('#am-save-btn').click(() => this._saveAndClose());
+            this.$el.on('click', (e) => {
+                if ($(e.target).is(`#${this.overlayId}`)) this.close();
+            });
+        }
+
+        open() {
+            $('#am-set-list').val(this.settings.get('selectedList'));
+            $('#am-set-margin').val(this.settings.get('freqMargin'));
+            $('#am-set-unit').val(this.settings.get('useMiles') ? 'mi' : 'km');
+            $('#am-set-kp').prop('checked', this.settings.get('showKp'));
+            $('#am-set-terminator').prop('checked', this.settings.get('showTerminator'));
+            $('#am-set-path').prop('checked', this.settings.get('showPath'));
+            $('#am-set-graph').prop('checked', this.settings.get('showGraph'));
+            $('#am-set-extended').prop('checked', this.settings.get('extendedInfo'));
+            
+            this.$el.css('display', 'block');
+            setTimeout(() => this.$el.addClass('visible'), 10);
+        }
+
+        close() { 
+            this.$el.removeClass('visible');
+            setTimeout(() => this.$el.css('display', 'none'), 300);
+        }
+
+        _saveAndClose() {
+            this.settings.set('selectedList', $('#am-set-list').val());
+            this.settings.set('freqMargin', parseInt($('#am-set-margin').val(), 10));
+            this.settings.set('useMiles', $('#am-set-unit').val() === 'mi');
+            this.settings.set('showKp', $('#am-set-kp').is(':checked'));
+            this.settings.set('showTerminator', $('#am-set-terminator').is(':checked'));
+            this.settings.set('showPath', $('#am-set-path').is(':checked'));
+            this.settings.set('showGraph', $('#am-set-graph').is(':checked'));
+            this.settings.set('extendedInfo', $('#am-set-extended').is(':checked'));
+            this.onSave();
+            this.close();
+        }
     }
 
-    const interpolate = (valBefore, valAfter) => valBefore + (valAfter - valBefore) * timeProgress;
+    /**
+     * MAIN PLUGIN
+     */
+    class AmStationPlugin {
+        constructor() {
+            this.settings = new SettingsManager();
+            this.modal = new SettingsModal(this.settings, () => this.onSettingsChanged());
+            
+            this.qth = { lat: 59.91, lon: 10.75 };
+            this.stationList = [];
+            this.currentIndex = 0;
+            this.currentMode = 'FM';
+            this.currentFreqKHz = 0;
+            this.isLocked = false;
+            this.lockedStationName = '';
+            
+            this.intervals = { activity: null, terminator: null };
+            
+            this.mapState = {
+                map: null,
+                layers: { terminator: null, line: null, qth: null, tx: null, placesBig: null, placesMed: null, placesSmall: null },
+                basemapLoaded: false,
+                leafletReadyPromise: null
+            };
+            
+            this.elements = {}; 
+            this.debounceTimer = null;
+            this.tooltipTimer = null;
+        }
 
-    const luf = interpolate(before.luf, after.luf);
-    const muf = interpolate(before.muf, after.muf);
-    const greenStart = interpolate(before.greenStart, after.greenStart);
-    const greenEnd = interpolate(before.greenEnd, after.greenEnd);
+        init() {
+            this._injectCombinedStyles();
+            this._buildUI();
+            this._fetchStaticData();
+            
+            const targetNode = document.getElementById('data-frequency');
+            if (targetNode) {
+                const observer = new MutationObserver(() => this._handleFrequencyChange());
+                observer.observe(targetNode, { childList: true, subtree: true, characterData: true });
+            }
+            setTimeout(() => this._handleFrequencyChange(), 1000);
+            console.log('AM-Station-Info v1.3 initialized.');
+        }
 
-    const usableBandwidth = muf - luf;
-    const greenStartsAt = (greenStart - luf) / (usableBandwidth || 1);
-    const greenEndsAt = (greenEnd - luf) / (usableBandwidth || 1);
+        onSettingsChanged() {
+            this._handleFrequencyChange();
+        }
 
-    return { luf, muf, greenStartsAt, greenEndsAt };
-}
+        _injectCombinedStyles() {
+            const css = `
+            /* --- NATIVE SERVER STYLE MODAL (SCOPED & COMPACT) --- */
+            
+            .am-native-modal {
+                display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                background-color: rgba(0, 0, 0, 0.6);
+                opacity: 0; transition: opacity 0.3s ease;
+                z-index: 20000; color: var(--color-4);
+                backdrop-filter: blur(10px);
+            }
+            .am-native-modal.visible { opacity: 1; }
 
-    function ensureLeafletMap() {
-        if (leafletMap) return;
-        leafletMap = L.map('aoki-map', { zoomControl: false, attributionControl: false });
-        L.control.zoom({ position: 'topright' }).addTo(leafletMap);
-        leafletMap.setView([20, 0], 2);
-    }
+            .am-native-content {
+                box-sizing: border-box; position: absolute;
+                top: 50%; left: 50%; transform: translate(-50%, -50%);
+                background-color: var(--color-main);
+                padding: 20px; border-radius: 15px;
+                min-width: 480px; max-width: 95%; 
+                max-height: 85vh;
+                display: flex; flex-direction: column;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+                border: 1px solid var(--color-4);
+            }
 
-function updatePropagationGraph(activeProfile) {
-    const maxFreq = 27;
+            .am-native-header { 
+                margin-bottom: 15px; position: relative; height: 30px; 
+                flex-shrink: 0;
+            }
+            .am-native-title { font-size: 20px; font-weight: 300; position: absolute; left: 0; top: 5px; }
+            
+            /* Styled Close Button */
+            .am-native-close {
+                position: absolute; top: 0; right: 0;
+                width: 32px; height: 32px;
+                background-color: var(--color-2);
+                border: 1px solid var(--color-4);
+                border-radius: 5px;
+                cursor: pointer; font-size: 20px; line-height: 28px;
+                text-align: center; color: var(--color-text);
+                transition: 0.3s ease background-color;
+            }
+            .am-native-close:hover { background-color: var(--color-4); color: var(--color-1); }
 
-    const { luf, muf, greenStartsAt, greenEndsAt } = activeProfile;
+            .am-native-body { 
+                flex-grow: 1; overflow-y: auto; 
+                margin-bottom: 10px; padding-right: 5px; 
+            }
 
-    const usableBandwidth = muf - luf;
+            .am-fieldset {
+                border: 2px solid var(--color-5);
+                border-radius: 10px;
+                padding: 10px 15px;
+                margin-bottom: 15px;
+                background: transparent;
+            }
+            .am-fieldset legend {
+                font-size: 1.0em; font-weight: bold;
+                color: var(--color-main-bright);
+                padding: 0 8px;
+            }
 
-    const yellowLowEnd = luf + (usableBandwidth * greenStartsAt);
-    const greenEnd = luf + (usableBandwidth * greenEndsAt);
-    
-    const redLufMHz = luf;
-    const yellowLowMHz = yellowLowEnd - luf;
-    const greenMHz = greenEnd - yellowLowEnd;
-    const yellowHighMHz = muf - greenEnd;
-    
-    const redLufPercent = (redLufMHz / maxFreq) * 100;
-    const yellowLowPercent = (yellowLowMHz / maxFreq) * 100;
-    const greenOptimalPercent = (greenMHz / maxFreq) * 100;
-    const yellowHighPercent = (yellowHighMHz / maxFreq) * 100;
-    const redMufPercent = 100 - redLufPercent - yellowLowPercent - greenOptimalPercent - yellowHighPercent;
+            .am-row, .am-switch-row {
+                background-color: transparent; 
+                border-bottom: 1px solid rgba(255,255,255,0.15);
+                padding: 6px 0; margin-bottom: 2px;
+                display: flex; justify-content: space-between; align-items: center;
+            }
+            .am-row:last-child, .am-switch-row:last-child { border-bottom: none; }
+            
+            .am-row label, .am-switch-text { 
+                font-size: 14px; font-weight: 500; color: var(--color-main-bright); 
+            }
 
-    $('#graph-red-luf').css('width', `${redLufPercent}%`);
-    $('#graph-yellow-low').css('width', `${yellowLowPercent}%`);
-    $('#graph-green-optimal').css('width', `${greenOptimalPercent}%`);
-    $('#graph-yellow-high').css('width', `${yellowHighPercent}%`);
-    $('#graph-red-muf').css('width', `${redMufPercent}%`);
-}
-    
-	function loadOfflineBasemapOnce() {
-        if (basemapLoaded) return Promise.resolve();
+            .am-native-input {
+                width: 160px; height: 32px;
+                background-color: var(--color-4); color: var(--color-main);
+                border: none; border-radius: 15px;
+                padding: 0 10px; font-weight: bold; font-size: 13px;
+                cursor: pointer; outline: none;
+                transition: 0.35s ease background-color;
+            }
+            .am-native-input:hover { background-color: var(--color-main-bright); }
+            .am-native-input option { background-color: var(--color-main); color: var(--color-4); }
 
-        $('#aoki-map').css('background', '#BDE0FE'); 
-        
-        const fetchJson = (url) => fetch(url).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
-        
-        const countriesPromise = fetchJson(COUNTRIES_GEOJSON).then(geo => {
-            L.geoJSON(geo, {
-                style: { color: '#3f3f3f', weight: 1, opacity: 1, fillColor: '#f2e9d8', fillOpacity: 0.8 },
-                onEachFeature: function(feature, layer) {
-                    const countryName = feature.properties.NAME; 
-                    if (countryName) {
-                        layer.bindTooltip(countryName, {
-                            permanent: true, 
-                            direction: 'center', 
-                            className: 'country-label' 
+            .switch { user-select: none; }
+            .switch input[type=checkbox] { height: 0; width: 0; margin: 0; visibility: hidden; position: absolute; }
+            .switch label {
+                cursor: pointer;
+                min-width: 54px; max-width: 54px; height: 30px;
+                background-color: var(--color-1);
+                transition: 0.35s background-color;
+                display: block; border-radius: 24px;
+                margin: 0; position: relative;
+                border: 2px solid var(--color-3);
+            }
+            .switch label::after {
+                content: ""; position: absolute; top: 3px; left: 3px;
+                width: 20px; height: 20px;
+                background: var(--color-5);
+                border-radius: 50%; transition: 0.3s;
+            }
+            .switch input[type=checkbox]:checked + label { background: var(--color-4); }
+            .switch input[type=checkbox]:checked + label::after {
+                left: calc(100% - 3px); transform: translateX(-100%);
+                background-color: var(--color-1);
+            }
+
+            .am-native-footer {
+                flex-shrink: 0; padding-top: 10px;
+                border-top: 1px solid rgba(255,255,255,0.1);
+                text-align: right;
+            }
+
+            .am-native-button {
+                width: 130px; height: 40px;
+                border-radius: 12px;
+                background: var(--color-4); color: var(--color-main);
+                font-weight: bold; border: 0;
+                transition: 0.35s ease background; cursor: pointer;
+            }
+            .am-native-button:hover { background: var(--color-5); }
+
+            @media (max-width: 500px) {
+                .am-native-content { min-width: 90%; padding: 15px; }
+                .am-native-input { width: 120px; }
+            }
+
+            /* --- V1 ORIGINAL MAP & PANEL CSS --- */
+            #aoki-plugin-display { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: var(--color-1); z-index: 1010; color: var(--color-text); box-sizing: border-box; display: none; text-align: center; border-radius: 15px; padding: 0px 10px; cursor: pointer; }
+            #am-settings-gear { position: absolute; top: 5px; right: 5px; font-size: 16px; opacity: 0; transition: opacity 0.2s; cursor: pointer; z-index: 1020; color: var(--color-4); }
+            #aoki-plugin-display:hover #am-settings-gear { opacity: 1; }
+
+            #aoki-station-content { display: flex; flex-direction: column; justify-content: flex-start; height: 100%; }
+            .station-name { margin-top: -3px; font-size: 1.4em; font-weight: bold; text-transform: uppercase; margin-bottom: 0px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--color-4); }
+            .station-location { font-size: 0.9em; margin-top: -5px; margin-bottom: 0px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .station-meta { font-size: 0.9em; margin-top: -7px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            
+            /* Centered Nav Controls */
+            #aoki-nav-controls { 
+                position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
+                display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: default; 
+            }
+            #aoki-nav-controls button { display: flex; align-items: center; justify-content: center; background: none; border: 1px solid var(--color-text); border-radius: 5px; color: var(--color-text); line-height: 1; cursor: pointer; opacity: 0.7; font-size: 13px; height: 26px; }
+            #aoki-nav-controls button.nav-btn { width: 34px; }
+            #aoki-nav-controls button:hover { opacity: 1; background-color: rgba(255,255,255,0.1); }
+            
+            /* Lock Button - Positioned Right */
+            #aoki-lock-btn { 
+                position: absolute; bottom: 5px; right: 5px; width: 26px; height: 26px;
+                display: flex; align-items: center; justify-content: center; background: none;
+                border: 1px solid var(--color-text); border-radius: 5px; color: var(--color-text);
+                cursor: pointer; opacity: 0.7; font-size: 13px;
+            }
+            #aoki-lock-btn:hover { opacity: 1; background-color: rgba(255,255,255,0.1); }
+            #aoki-lock-btn.locked { background-color: var(--color-4); color: var(--color-1); border-color: var(--color-4); opacity: 1; }
+            
+            #aoki-source-display { position: absolute; bottom: 0px; left: 5px; font-size: 11px; opacity: 0.6; cursor: default; }
+            
+            .alt-freq-list { height: calc(100% - 50px); overflow-y: auto; font-size: 14px; }
+            .alt-freq-item { padding: 4px 0; cursor: pointer; border-radius: 5px; }
+            .alt-freq-item:hover { background-color: rgba(255, 255, 255, 0.1); }
+            
+            /* COLOR 5 FOR ACTIVE FREQUENCY */
+            .alt-freq-item.active-freq { 
+                font-weight: bold; color: var(--color-5); 
+                background-color: rgba(255, 255, 255, 0.05); 
+                cursor: default; pointer-events: none; 
+                border: 1px solid rgba(255,255,255,0.1); 
+            }
+
+            /* TOOLTIP Z-INDEX FIX */
+            #aoki-station-info-tooltip.aoki-tooltiptext {
+                position: fixed; transform: translate(-50%, -100%); 
+                z-index: 5000; /* Lower than modal (20000) but higher than panel (1010) */
+                background-color: var(--color-2); border: 2px solid var(--color-3);
+                color: var(--color-text); text-align: center; font-size: 14px;
+                border-radius: 15px; padding: 8px 15px; opacity: 0;
+                transition: opacity 0.3s ease; pointer-events: none; white-space: nowrap;
+            }
+
+            /* KART & GRAF (V1 ORIGINAL) */
+            #aoki-map-modal { position: fixed; inset: 0; z-index: 99998; display: none; }
+            #aoki-map-modal .aoki-map-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, .6); backdrop-filter: blur(10px); }
+            #aoki-map-modal .aoki-map-dialog { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; width: 75vw; height: 80vh; max-width: 1400px; max-height: 850px; background: var(--color-main); border-radius: 15px; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); overflow: hidden; z-index: 99999; }
+            
+            .aoki-map-header { display: flex; justify-content: space-between; align-items: center; height: 45px; padding: 5px 10px; background-color: var(--color-2); border-bottom: 1px solid var(--color-4); flex-shrink: 0; }
+            .header-left-group { display: flex; align-items: center; gap: 15px; }
+            .aoki-map-title { font-size: 20px; font-weight: bold; color: var(--color-main-bright); }
+            #aoki-map-kp { font-size: 14px; font-weight: bold; padding: 2px 8px; border-radius: 4px; background-color: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); display: none; }
+
+            .aoki-map-close { width: 100px; height: 34px; border-radius: 15px; background-color: var(--color-3); border: 1px solid var(--color-4); color: var(--color-main-bright); font-size: 20px; font-weight: normal; display: flex; align-items: center; justify-content: center; line-height: 1; cursor: pointer; transition: 0.3s ease background-color, 0.3s ease color; }
+            .aoki-map-close:hover { background-color: var(--color-5); color: var(--color-1); }
+            
+            .aoki-map-footer { display: flex; align-items: center; justify-content: space-between; height: 45px; padding: 5px 10px; background-color: var(--color-2); border-top: 1px solid var(--color-4); flex-shrink: 0; gap: 10px; }
+            .footer-data-left, .footer-data-right { flex: 0 0 100px; }
+            
+            #propagation-graph-container { flex-grow: 1; position: relative; height: 100%; }
+            #propagation-graph { display: flex; width: 100%; height: 20px; border-radius: 5px; overflow: hidden; border: 1px solid rgba(255,255,255,0.2); position: absolute; bottom: 0; }
+            .graph-zone { height: 100%; transition: width 0.5s ease; }
+            .graph-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--color-text); opacity: 0.7; padding: 0 2px; }
+            #graph-markers { position: absolute; bottom: 0; left: 0; width: 100%; height: 20px; pointer-events: none; }
+            .marker { position: absolute; height: 100%; width: 1px; background-color: rgba(0, 0, 0, 0.2); }
+            .marker.label { height: 150%; background-color: rgba(0, 0, 0, 0.4); }
+            .marker.label::after { content: attr(data-label); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); font-size: 9px; color: var(--color-text); opacity: 0.7; }
+            #graph-red-luf { background-color: #c0392b; }  
+            #graph-yellow-low { background-color: #f1c40f; } 
+            #graph-green-optimal { background-color: #2ecc71; } 
+            #graph-yellow-high { background-color: #f1c40f; }  
+            #graph-red-muf { background-color: #c0392b; }  
+            #frequency-pointer-container, #frequency-pointer-container-bottom { position: absolute; left: 0; width: 100%; height: 6px; z-index: 2; pointer-events: none; }
+            #frequency-pointer-container { top: 9px; }
+            #frequency-pointer-container-bottom { bottom: -5px; }
+            #frequency-pointer-top, #frequency-pointer-bottom { position: absolute; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; transform: translateX(-50%); display: none; }
+            #frequency-pointer-top { border-top: 6px solid var(--color-4); }
+            #frequency-pointer-bottom { border-bottom: 6px solid var(--color-4); }
+            
+            #aoki-map { width: 100%; height: 100%; flex-grow: 1; }
+            .leaflet-top.leaflet-right .leaflet-control-zoom { margin-top: 12px; margin-right: 12px; }
+            .country-label { background: transparent; border: none; box-shadow: none; color: rgba(0, 0, 0, 0.6); font-size: 14px; font-weight: bold; text-shadow: 0 0 2px #fff, 0 0 2px #fff; pointer-events: none; display: none; }
+            .leaflet-zoom-3 .country-label, .leaflet-zoom-4 .country-label, .leaflet-zoom-5 .country-label { display: block; }
+            .ne-place-label span { font-size: 12px; color: #f0f0f0; text-shadow: 0 1px 3px rgba(0, 0, 0, .9); white-space: nowrap; user-select: none; pointer-events: none; }
+            
+            #aoki-map-infobox { position: absolute; top: 60px; left: 15px; width: 280px; background: var(--color-1-transparent); border: 1px solid #777; border-radius: 8px; z-index: 100000; box-shadow: 0 2px 10px rgba(0, 0, 0, .5); color: var(--color-text); font-family: sans-serif; font-size: 14px; pointer-events: none; }
+            #aoki-map-infobox > * { pointer-events: auto; }
+            #aoki-map-infobox .info-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: var(--color-2); border-bottom: 1px solid #777; border-radius: 8px 8px 0 0; cursor: pointer; }
+            #aoki-map-infobox .info-header h4 { margin: 0; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            #aoki-map-infobox .info-toggle { padding: 0 5px; font-size: 20px; font-weight: bold; }
+            #aoki-map-infobox .info-content { display: none; padding: 12px; max-height: 400px; overflow-y: auto; }
+            #aoki-map-infobox.is-open .info-content { display: block; }
+            #aoki-map-infobox .info-content p { margin: 0 0 8px 0; line-height: 1.4; }
+            #aoki-map-infobox .info-content strong { display: inline-block; min-width: 90px; color: var(--color-main-bright); }
+            .leaflet-control-zoom { border: none !important; box-shadow: 0 1px 5px rgba(0,0,0,0.4); }
+            .leaflet-control-zoom-in, .leaflet-control-zoom-out { background-color: var(--color-2-transparent) !important; color: var(--color-main-bright) !important; transition: background-color 0.2s ease; }
+            .leaflet-control-zoom-in:hover, .leaflet-control-zoom-out:hover { background-color: var(--color-4-transparent) !important; }
+            .leaflet-control-zoom-in { border-top-left-radius: 10px !important; border-top-right-radius: 10px !important; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+            .leaflet-control-zoom-out { border-bottom-left-radius: 10px !important; border-bottom-right-radius: 10px !important; border-top-left-radius: 0; border-top-right-radius: 0; border-top: none; }
+            @media (max-width: 700px) { #aoki-map-modal .aoki-map-dialog { box-sizing: border-box; top: 10px; right: 10px; bottom: 10px; left: 10px; width: 95vw; height: 75vh; transform: none; } #aoki-map-infobox { width: 240px; left: 10px; top: 55px; } .aoki-map-title { font-size: 18px; } .aoki-map-close { width: 80px; } }
+            
+            /* --- MOBILE AF FIX --- */
+            @media (max-width: 600px) {
+                body.am-station-info-active #af-list { display: none !important; }
+            }
+            `;
+            $('<style>').text(css).appendTo('head');
+        }
+
+        _buildUI() {
+            const container = $('#data-station-container');
+            if (!container.length) return;
+            container.parent().css('position', 'relative');
+
+            const display = $('<div id="aoki-plugin-display"></div>');
+            const settingsBtn = $('<div id="am-settings-gear">⚙️</div>');
+            settingsBtn.click((e) => { e.stopPropagation(); this.modal.open(); });
+            display.append(settingsBtn);
+
+            display.on('mouseenter mouseover mousemove', e => e.stopPropagation());
+
+            const content = $('<div id="aoki-station-content"></div>');
+            
+            // --- UI CHANGES: Center Nav, Right Lock ---
+            const nav = $('<div id="aoki-nav-controls"></div>');
+            const btnPrev = $('<button class="nav-btn">&lt;</button>').click((e) => { e.stopPropagation(); this._nav(-1); });
+            const btnNext = $('<button class="nav-btn">&gt;</button>').click((e) => { e.stopPropagation(); this._nav(1); });
+            
+            // Detached Lock Button
+            const btnLock = $('<button id="aoki-lock-btn" title="Lock Network">🔓</button>').click((e) => { e.stopPropagation(); this._toggleLock(); });
+            
+            this.elements.counter = $('<span></span>');
+            
+            // Append Nav Items (No lock button here)
+            nav.append(btnPrev, this.elements.counter, btnNext);
+            
+            this.elements.source = $('<span id="aoki-source-display"></span>');
+            
+            // Append everything to display
+            display.append(content, nav, btnLock, this.elements.source);
+            container.parent().append(display);
+            
+            this.elements.display = display;
+            this.elements.content = content;
+            this.elements.lockBtn = btnLock;
+            this.elements.nav = nav;
+
+            const tooltipHTML = 'This panel only shows information about available<br>stations in the database, this is not RDS data.<br><br>Click to open local map.';
+            this.elements.tooltip = $('<span>', { id: 'aoki-station-info-tooltip', class: 'aoki-tooltiptext' }).html(tooltipHTML);
+            $('body').append(this.elements.tooltip);
+            this.elements.tooltip.hide();
+
+            display.on('mouseenter', () => this._showTooltip());
+            display.on('mouseleave', () => this._hideTooltip());
+            
+            this._buildMapModal(); 
+
+            // FIX: Always open map and hide tooltip
+            display.click((e) => {
+                if (!$(e.target).closest('button, #am-settings-gear').length) {
+                    const st = this.stationList[this.currentIndex];
+                    if (st && st.distance !== null) this._openMap(st);
+                    this._hideTooltip();
+                }
+            });
+            
+            $(document).on('click', (e) => { 
+                if (!display.is(e.target) && display.has(e.target).length === 0) { 
+                    if (this.elements.tooltip.is(':visible')) this._hideTooltip(); 
+                } 
+            });
+        }
+
+        _showTooltip() {
+            if (this.tooltipTimer) clearTimeout(this.tooltipTimer);
+            const rect = this.elements.display[0].getBoundingClientRect();
+            this.elements.tooltip.css({
+                top: `${rect.top - 10}px`,
+                left: `${rect.left + (rect.width / 2)}px`,
+                opacity: 0
+            }).show();
+            setTimeout(() => { this.elements.tooltip.css('opacity', 1); }, 10);
+            this.tooltipTimer = setTimeout(() => { this._hideTooltip(); }, 6000); 
+        }
+
+        _hideTooltip() {
+            if (this.tooltipTimer) { clearTimeout(this.tooltipTimer); this.tooltipTimer = null; }
+            this.elements.tooltip.css('opacity', 0);
+            setTimeout(() => { if (this.elements.tooltip.css('opacity') === '0') { this.elements.tooltip.hide(); } }, 300);
+        }
+
+        _buildMapModal() {
+            const mapModal = $(`
+            <div id="aoki-map-modal">
+                <div class="aoki-map-backdrop"></div>
+                <div class="aoki-map-dialog">
+                  <div class="aoki-map-header">
+                    <div class="header-left-group">
+                        <span class="aoki-map-title">Station Map</span>
+                        <span id="aoki-map-kp" title="Global Kp Index">Kp: -</span>
+                    </div>
+                    <button class="aoki-map-close" aria-label="Close">Close</button>
+                  </div>
+                  <div id="aoki-map"></div> 
+                  <div class="aoki-map-footer">
+                    <div class="footer-data-left"></div>
+                    <div id="propagation-graph-container">
+                      <div id="frequency-pointer-container"><div id="frequency-pointer-top"></div></div>
+                      <div class="graph-labels"><span>0 MHz</span><span>27 MHz</span></div>
+                      <div id="propagation-graph">
+                        <div id="graph-red-luf" class="graph-zone"></div>
+                        <div id="graph-yellow-low" class="graph-zone"></div>
+                        <div id="graph-green-optimal" class="graph-zone"></div>
+                        <div id="graph-yellow-high" class="graph-zone"></div>
+                        <div id="graph-red-muf" class="graph-zone"></div>
+                        <div id="frequency-line"></div>
+                      </div>
+                      <div id="frequency-pointer-container-bottom"><div id="frequency-pointer-bottom"></div></div>
+                      <div id="graph-markers"></div>
+                    </div>
+                    <div class="footer-data-right"></div>
+                  </div>
+                </div>
+            </div>`);
+            
+            $('body').append(mapModal);
+            
+            let markersHTML = '';
+            for (let i = 1; i < 27; i++) {
+                const percentPosition = (i / 27) * 100;
+                let className = 'marker';
+                let dataAttribute = '';
+                if (i % 5 === 0) {
+                    className += ' label';
+                    dataAttribute = `data-label="${i}"`;
+                }
+                markersHTML += `<div class="${className}" style="left: ${percentPosition}%;" ${dataAttribute}></div>`;
+            }
+            $('#graph-markers').html(markersHTML);
+
+            mapModal.find('.aoki-map-close, .aoki-map-backdrop').click(() => this._closeMap());
+            $(document).on('keydown', e => { if (e.key === 'Escape' && $('#aoki-map-modal').is(':visible')) this._closeMap(); });
+        }
+
+        _fetchStaticData() {
+            $.getJSON('/static_data', data => {
+                if (data.qthLatitude && data.qthLongitude) {
+                    this.qth.lat = parseFloat(data.qthLatitude);
+                    this.qth.lon = parseFloat(data.qthLongitude);
+                }
+            });
+        }
+
+        _handleFrequencyChange() {
+            clearTimeout(this.debounceTimer);
+            this.debounceTimer = setTimeout(() => {
+                const freqText = $('#data-frequency').text();
+                if (!freqText) return;
+                const freqMHz = parseFloat(freqText);
+                
+                if (this.intervals.activity) clearInterval(this.intervals.activity);
+
+                if (freqMHz <= CONFIG.maxFreq) {
+                    if (this.currentMode !== 'AM') {
+                        this.currentMode = 'AM';
+                        $('body').addClass('am-station-info-active');
+                        $('#data-station-container').hide();
+                        this.elements.display.show();
+                    }
+                    this._fetchData(freqMHz);
+                    this.intervals.activity = setInterval(() => this._fetchData(freqMHz), 10000);
+                } else {
+                    if (this.currentMode !== 'FM') {
+                        this.currentMode = 'FM';
+                        $('body').removeClass('am-station-info-active');
+                        this.elements.display.hide();
+                        $('#data-station-container').show();
+                        $('#af-list').empty();
+                        this.isLocked = false;
+                        this.elements.lockBtn.removeClass('locked').html('🔓');
+                        if(this.elements.tooltip) this._hideTooltip();
+                    }
+                }
+            }, 100);
+        }
+
+        _fetchData(freqMHz) {
+            this.currentFreqKHz = Math.round(freqMHz * 1000);
+            const margin = this.settings.get('freqMargin');
+            const url = `${CONFIG.apiEndpoint}?freq=${this.currentFreqKHz}&lat=${this.qth.lat}&lon=${this.qth.lon}&margin=${margin}`;
+            
+            $.getJSON(url).done(data => {
+                if (this.currentMode !== 'AM') return;
+                
+                if (data && data.status === 'success' && data.stations && data.stations.length > 0) {
+                    let stations = data.stations;
+                    const selectedList = this.settings.get('selectedList');
+                    
+                    if (selectedList !== 'all') {
+                        stations = stations.filter(s => {
+                            const src = (s.source || '').toLowerCase();
+                            if (selectedList === 'aoki') return src.includes('aoki');
+                            if (selectedList === 'user') return src.includes('user');
+                            if (selectedList === 'mwlist') return src.includes('mwlist');
+                            return true;
                         });
                     }
-                }
-            }).addTo(leafletMap);
-        });
-        
-        const placesPromise = fetchJson(PLACES_GEOJSON).then(geo => {
-            const readRank = p => (p?.SCALERANK == null ? 3 : +p.SCALERANK);
-            const isBig = p => readRank(p) <= 2;
-            const isMed = p => readRank(p) > 2 && readRank(p) <= 4;
-            const mk = (filterFn) => L.geoJSON(geo, {
-                filter: f => filterFn(f.properties || {}),
-                pointToLayer: (feature, latlng) => L.marker(latlng, {
-                    icon: L.divIcon({ className: 'ne-place-label', html: `<span>${feature.properties?.NAME || ''}</span>`, iconSize: [0, 0] }),
-                    keyboard: false, interactive: false
-                })
-            });
 
-            const placesBigLayer = mk(isBig);
-            const placesMedLayer = mk(isMed);
-            const placesSmallLayer = mk(p => !isBig(p) && !isMed(p));
+                    stations.sort((a, b) => {
+                        const pA = (a.power && !isNaN(a.power) && parseFloat(a.power) > 0) ? 1 : 0;
+                        const pB = (b.power && !isNaN(b.power) && parseFloat(b.power) > 0) ? 1 : 0;
+                        return pB - pA;
+                    });
 
-            const update = () => {
-                const z = leafletMap.getZoom();
-
-                if (z >= 3 && !leafletMap.hasLayer(placesBigLayer)) {
-                    leafletMap.addLayer(placesBigLayer);
-                } else if (z < 3 && leafletMap.hasLayer(placesBigLayer)) {
-                    leafletMap.removeLayer(placesBigLayer);
-                }
-
-                if (z >= 5 && !leafletMap.hasLayer(placesMedLayer)) {
-                    leafletMap.addLayer(placesMedLayer);
-                } else if (z < 5 && leafletMap.hasLayer(placesMedLayer)) {
-                    leafletMap.removeLayer(placesMedLayer);
-                }
-
-                if (z >= 7 && !leafletMap.hasLayer(placesSmallLayer)) {
-                    leafletMap.addLayer(placesSmallLayer);
-                } else if (z < 7 && leafletMap.hasLayer(placesSmallLayer)) {
-                    leafletMap.removeLayer(placesSmallLayer);
-                }
-            };
-
-            leafletMap.on('zoomend', update);
-            update();
-        }).catch(err => console.error('Places load failed:', err));
-        
-        basemapLoaded = true;
-        
-        return Promise.all([countriesPromise, placesPromise]);
-    }
-
-    function getStationCoords(station) {
-        const lat = station.lat ?? station.latitude;
-        const lon = station.lon ?? station.longitude;
-        if (lat == null || lon == null) return null;
-        const numLat = parseFloat(lat), numLon = parseFloat(lon);
-        return (Number.isFinite(numLat) && Number.isFinite(numLon)) ? { lat: numLat, lon: numLon } : null;
-    }
-
-    function closeAndDestroyMap() {
-        $('#aoki-map-modal').hide();
-        if (terminatorInterval) {
-            clearInterval(terminatorInterval);
-            terminatorInterval = null;
-        }
-        if (leafletMap) {
-            leafletMap.remove();
-            leafletMap = null;
-            basemapLoaded = false;
-        }
-    }
-
-
-function openMapModalForStationOffline(station) {
-    const stationLL = getStationCoords(station);
-    if (!stationLL) { alert('Missing transmitter coordinates in station data.'); return; }
-
-    $('#aoki-map-modal').show();
-
-    ensureLeafletLoaded().then(() => {
-        ensureLeafletMap();
-        
-        setTimeout(() => { if (leafletMap) leafletMap.invalidateSize(); }, 10);
-
-        if (terminatorInterval) clearInterval(terminatorInterval);
-
-        loadOfflineBasemapOnce().then(() => {
-            if (mapNeedsResize) mapNeedsResize = false;
-            if (SHOW_PROPAGATION_GRAPH) {
-                createGraphMarkers();
-
-                const updateDynamicElements = () => {
-                    if (terminatorLayer) {
-                        terminatorLayer.remove();
+                    if (stations.length === 0) {
+                        this._displayNoStations("No stations in selected list.");
+                        return;
                     }
-                    terminatorLayer = L.terminator({ fillOpacity: 0.35, color: '#051945' }).addTo(leafletMap);
-                    
-                    const activeProfile = getDynamicProfile();
-                    if (activeProfile) {
-                        updatePropagationGraph(activeProfile);
-                        updateFrequencyMarker(currentFreqKHz, activeProfile);
+
+                    let foundLockedIndex = -1;
+                    if (this.isLocked && this.lockedStationName) {
+                        foundLockedIndex = stations.findIndex(s => s.name === this.lockedStationName);
+                    }
+
+                    if (!this._areListsEqual(this.stationList, stations)) {
+                        this.currentIndex = (foundLockedIndex !== -1) ? foundLockedIndex : 0;
+                    } else {
+                        if (foundLockedIndex !== -1 && this.currentIndex !== foundLockedIndex) {
+                            this.currentIndex = foundLockedIndex;
+                        }
+                    }
+
+                    this.stationList = stations;
+                    this._renderStation();
+                } else {
+                    this._displayNoStations(data.message || 'No active stations.');
+                }
+            }).fail(() => this._displayNoStations('Error loading data.'));
+        }
+
+        _displayNoStations(msg) {
+            this.stationList = [];
+            this.elements.content.html(`<h4 style="padding-top:25px;margin:0;">${msg}</h4>`);
+            this.elements.nav.hide();
+            this.elements.source.hide();
+            $('#af-list').empty();
+        }
+
+        _renderStation() {
+            if (this.stationList.length === 0) return;
+            const station = this.stationList[this.currentIndex];
+            const useMiles = this.settings.get('useMiles');
+            
+            if (this.isLocked) this.lockedStationName = station.name;
+
+            let distText = 'Dist: N/A';
+            if (station.distance !== null) {
+                if (useMiles) {
+                    const miles = Math.round(station.distance * 0.621371);
+                    distText = `${miles} mi`;
+                } else {
+                    distText = `${Math.round(station.distance)} km`;
+                }
+            }
+
+            let loc = station.location || 'N/A';
+            if (loc.length > 24) loc = loc.substring(0, 24) + '...';
+            
+            let power = (station.power !== null) ? station.power : 'N/A';
+
+            const html = `
+                <div class="station-name">${station.name}</div>
+                <div class="station-location">${loc} <span class="text-gray">[${station.country}]</span> <span class="text-gray">▪</span> ${distText}</div>
+                <div class="station-meta">${station.language} <span class="text-gray">▪</span> ${station.timeUTC}z <span class="text-gray">▪</span> ${power}kW</div>
+            `;
+
+            this.elements.content.html(html);
+            this.elements.source.text(station.source).show();
+            this.elements.nav.toggle(this.stationList.length > 0); 
+            this.elements.counter.text(`${this.currentIndex + 1} / ${this.stationList.length}`);
+            
+            const currentStationFreq = station.frequency || this.currentFreqKHz;
+            this._renderAfList(station.alternative_frequencies, currentStationFreq);
+            this.elements.display.css('cursor', station.distance !== null ? 'pointer' : 'default');
+        }
+
+        _renderAfList(freqs, current) {
+            const container = $('#af-list');
+            container.empty();
+            let all = [...(freqs || [])];
+            if(current) all.push(current);
+            all = [...new Set(all)].sort((a,b)=>a-b);
+            
+            if(all.length === 0) return;
+            let html = '<div class="alt-freq-list">';
+            all.forEach(f => {
+                const display = f > 1000 ? (f/1000).toFixed(3) : f;
+                const activeClass = (f === current) ? ' active-freq' : '';
+                html += `<div class="alt-freq-item${activeClass}" data-freq="${f}">${display}</div>`;
+            });
+            html += '</div>';
+            container.html(html);
+            
+            container.find('.alt-freq-item').click((e) => {
+                if ($(e.target).hasClass('active-freq')) return;
+                const f = $(e.target).data('freq');
+                if (typeof socket !== 'undefined' && socket.readyState === 1) socket.send("T"+f);
+            });
+        }
+
+        _nav(dir) {
+            if (this.stationList.length === 0) return;
+            this.currentIndex = (this.currentIndex + dir + this.stationList.length) % this.stationList.length;
+            if (this.isLocked) this.lockedStationName = this.stationList[this.currentIndex].name;
+            this._renderStation();
+        }
+
+        _toggleLock() {
+            this.isLocked = !this.isLocked;
+            if (this.isLocked) {
+                this.elements.lockBtn.addClass('locked').html('🔒');
+                if (this.stationList.length > 0) this.lockedStationName = this.stationList[this.currentIndex].name;
+            } else {
+                this.elements.lockBtn.removeClass('locked').html('🔓');
+                this.lockedStationName = '';
+            }
+        }
+
+        _areListsEqual(a, b) {
+            if (a.length !== b.length) return false;
+            for (let i = 0; i < a.length; i++) if (a[i].name !== b[i].name) return false;
+            return true;
+        }
+
+        async _openMap(station) {
+            $('#aoki-map-modal').show();
+            
+            if (this.settings.get('showKp')) {
+                this._fetchKpIndex();
+            } else {
+                $('#aoki-map-kp').hide();
+            }
+            
+            if(this.settings.get('showGraph')) {
+                $('.aoki-map-footer').show();
+                $('.aoki-map-dialog').css('padding-bottom', '0');
+            } else {
+                $('.aoki-map-footer').hide();
+            }
+
+            await this._ensureLeafletLoaded();
+            this._ensureLeafletMap();
+
+            setTimeout(() => { if (this.mapState.map) this.mapState.map.invalidateSize(); }, 10);
+            if (this.intervals.terminator) clearInterval(this.intervals.terminator);
+
+            await this._loadOfflineBasemapOnce();
+            
+            if (this.settings.get('showGraph') || this.settings.get('showTerminator')) {
+                const updateDynamics = () => {
+                    if (this.mapState.layers.terminator) this.mapState.layers.terminator.remove();
+                    if (this.settings.get('showTerminator')) {
+                        this.mapState.layers.terminator = L.terminator({ fillOpacity: 0.35, color: '#051945' }).addTo(this.mapState.map);
+                    }
+
+                    if (this.settings.get('showGraph')) {
+                        const activeProfile = this._getDynamicProfile();
+                        if (activeProfile) {
+                            this._updatePropagationGraph(activeProfile);
+                            this._updateFrequencyMarker(this.currentFreqKHz, activeProfile);
+                        }
                     }
                 };
-                
-                updateDynamicElements();
-                terminatorInterval = setInterval(updateDynamicElements, 60000);
-            } else {
-                // Hvis grafen er av, tegn kun natt/dag-laget én gang
-                if (terminatorLayer) terminatorLayer.remove();
-                terminatorLayer = L.terminator({ fillOpacity: 0.35, color: '#051945' }).addTo(leafletMap);
+                updateDynamics();
+                this.intervals.terminator = setInterval(updateDynamics, 60000);
             }
 
-            if (currentLine) leafletMap.removeLayer(currentLine);
-            if (qthMarker) leafletMap.removeLayer(qthMarker);
-            if (txMarker) leafletMap.removeLayer(txMarker);
+            if (this.mapState.layers.line) this.mapState.map.removeLayer(this.mapState.layers.line);
+            if (this.mapState.layers.qth) this.mapState.map.removeLayer(this.mapState.layers.qth);
+            if (this.mapState.layers.tx) this.mapState.map.removeLayer(this.mapState.layers.tx);
             $('#aoki-map-infobox').remove();
 
-            const qthLat = parseFloat(qthLatitude), qthLon = parseFloat(qthLongitude);
-
-            qthMarker = L.circleMarker([qthLat, qthLon], {
-                radius: 7, color: '#ffffff', weight: 2, fillColor: '#007bff', fillOpacity: 1.0
-            }).addTo(leafletMap).bindPopup('QTH (Receiver)');
-
-            const transmitterIcon = L.icon({
-                iconUrl: '/assets/leaflet/images/transmitter-icon.png', 
-                iconSize: [38, 38], iconAnchor: [19, 19], popupAnchor: [0, -30] 
-            });
+            this.mapState.layers.qth = L.circleMarker([this.qth.lat, this.qth.lon], { radius: 7, color: '#ffffff', weight: 2, fillColor: '#007bff', fillOpacity: 1.0 }).addTo(this.mapState.map).bindPopup('QTH');
             
-            txMarker = L.marker([stationLL.lat, stationLL.lon], { icon: transmitterIcon })
-                .addTo(leafletMap)
-                .bindPopup(`<b>${station.name}</b><br>${station.location}<br>Distance: ${station.distance} km`);
+            const stLat = parseFloat(station.lat||station.latitude);
+            const stLon = parseFloat(station.lon||station.longitude);
+            const transmitterIcon = L.icon({ iconUrl: '/assets/leaflet/images/transmitter-icon.png', iconSize: [38, 38], iconAnchor: [19, 19], popupAnchor: [0, -30] });
+            this.mapState.layers.tx = L.marker([stLat, stLon], { icon: transmitterIcon }).addTo(this.mapState.map);
 
-            const startPoint = { x: qthLon, y: qthLat };
-            const endPoint = { x: stationLL.lon, y: stationLL.lat };
-            const generator = new arc.GreatCircle(startPoint, endPoint);
-            const lineData = generator.Arc(100, { offset: 10 });
-            const greatCirclePoints = lineData.geometries[0].coords.map(c => [c[1], c[0]]);
+            if (this.settings.get('showPath')) {
+                const generator = new arc.GreatCircle({ x: this.qth.lon, y: this.qth.lat }, { x: stLon, y: stLat });
+                const lineData = generator.Arc(100, { offset: 10 });
+                const points = lineData.geometries[0].coords.map(c => [c[1], c[0]]);
+                this.mapState.layers.line = L.polyline(points, { weight: 3, opacity: 0.9, dashArray: '6,8' }).addTo(this.mapState.map);
+                this.mapState.map.fitBounds(this.mapState.layers.line.getBounds(), { padding: [50, 50] });
+            } else {
+                 this.mapState.map.setView([stLat, stLon], 4);
+            }
 
-            currentLine = L.polyline(greatCirclePoints, { 
-                weight: 3, opacity: 0.9, dashArray: '6,8' 
-            }).addTo(leafletMap);
-            
-            leafletMap.fitBounds(currentLine.getBounds(), { padding: [50, 50] });
-
-            let distanceText = 'N/A';
-            if (station.distance != null && !isNaN(station.distance)) {
+            const useMiles = this.settings.get('useMiles');
+            let distText = 'N/A';
+            if (station.distance != null) {
                 const km = Math.round(station.distance);
                 const miles = Math.round(km * 0.621371);
-                distanceText = `${km} km / ${miles} mi`;
+                distText = useMiles ? `${miles} mi` : `${km} km`;
             }
+            let loc = station.location || 'N/A';
+            if (loc.length > 24) loc = loc.substring(0, 24) + '...';
 
             const infoHTML = `
               <div id="aoki-map-infobox">
-                <div class="info-header">
-                  <h4>${station.name}</h4>
-                  <span class="info-toggle" title="Show/hide details">+</span>
-                </div>
-                <div class="info-content">
-                  <p><strong>Location:</strong> ${station.location||'N/A'}</p>
-                  <p><strong>Distance:</strong> ${distanceText}</p>
-                  <p><strong>Country:</strong> ${station.country||'N/A'}</p>
-                  <p><strong>Frequency:</strong> ${station.frequency||'N/A'} kHz</p>
-                  <p><strong>Power:</strong> ${station.power||'N/A'} kW</p>
-                  <p><strong>Broadcast:</strong> ${station.timeUTC||'N/A'} UTC</p>
-                  <p><strong>Days:</strong> ${station.days||'N/A'}</p>
-                  <p><strong>Language:</strong> ${station.language||'N/A'}</p>
-                  <p><strong>Azimuth:</strong> ${station.azimuth||'N/A'}</p>
-                  <p><strong>Info:</strong> ${station.remarks||'N/A'}</p>
+                <div class="info-header"><h4>${station.name}</h4><span class="info-toggle">${this.settings.get('extendedInfo') ? '−' : '+'}</span></div>
+                <div class="info-content" style="${this.settings.get('extendedInfo') ? 'display:block' : ''}">
+                  <p><strong>Location:</strong> ${loc}</p><p><strong>Distance:</strong> ${distText}</p>
+                  <p><strong>Country:</strong> ${station.country||'N/A'}</p><p><strong>Frequency:</strong> ${station.frequency||this.currentFreqKHz} kHz</p>
+                  <p><strong>Power:</strong> ${station.power||'N/A'} kW</p><p><strong>Broadcast:</strong> ${station.timeUTC||'N/A'} UTC</p>
+                  <p><strong>Days:</strong> ${station.days||'N/A'}</p><p><strong>Language:</strong> ${station.language||'N/A'}</p>
+                  <p><strong>Azimuth:</strong> ${station.azimuth||'N/A'}</p><p><strong>Info:</strong> ${station.remarks||'N/A'}</p>
                   <p><strong>Source:</strong> ${station.source||'N/A'}</p>
                 </div>
               </div>`;
-
+            
             const $infoBox = $(infoHTML).appendTo('#aoki-map-modal .aoki-map-dialog');
             const $infoContent = $infoBox.find('.info-content');
-            
-            $infoBox.find('.info-header').on('click', function(e) {
-                e.stopPropagation();
-                $infoContent.slideToggle(200);
-                $(this).find('.info-toggle').text((i, text) => text === '−' ? '+' : '−');
+            $infoBox.find('.info-header').on('click', function(e) { 
+                e.stopPropagation(); 
+                $infoContent.slideToggle(200); 
+                $(this).find('.info-toggle').text((i, text) => text === '−' ? '+' : '−'); 
             });
-
-            txMarker.on('click', function() {
-                if (!$infoContent.is(':visible')) {
-                    $infoContent.slideDown(200);
-                    $infoBox.find('.info-toggle').text('−');
-                }
+            this.mapState.layers.tx.on('click', function() { 
+                if (!$infoContent.is(':visible')) { $infoContent.slideDown(200); $infoBox.find('.info-toggle').text('−'); } 
             });
+        }
 
-        });
-    }).catch(err => {
-        console.error("Could not load Leaflet or a plugin:", err);
-        alert("Error: The map library or a required plugin could not be loaded.");
-    });
-}
-    
-    $mapModal.on('click', '.aoki-map-backdrop, .aoki-map-close', closeAndDestroyMap);
-    $(document).on('keydown', e => { if (e.key === 'Escape' && $('#aoki-map-modal').is(':visible')) closeAndDestroyMap(); });
-
-    function fetchStaticData(){$.getJSON('/static_data',data=>{if(data.qthLatitude&&data.qthLongitude){qthLatitude=data.qthLatitude;qthLongitude=data.qthLongitude;}});}
-    function displayAlternativeFrequencies(frequencies){$afContainer.empty();if(!frequencies||frequencies.length===0)return;let afHTML=`<div class="alt-freq-list" style="height:100%;">`;frequencies.forEach(freq=>{const displayFreq=freq>1000?(freq/1000).toFixed(3):freq;afHTML+=`<div class="alt-freq-item" data-freq="${freq}">${displayFreq}</div>`;});afHTML+=`</div>`;$afContainer.html(afHTML);}
-    function tuneToFrequency(freqKHz){if(typeof socket!=='undefined'&&socket.readyState===WebSocket.OPEN){socket.send("T"+freqKHz);}}
-    function areStationListsEqual(listA,listB){if(listA.length!==listB.length)return!1;for(let i=0;i<listA.length;i++){if(listA[i].name!==listB[i].name)return!1;}return!0;}
-
-function displayStation() {
-    if (stationList.length === 0) {
-        $aokiContent.html('<h4 style="padding-top:25px;margin:0;">No active stations found.</h4>');
-        $navControls.hide();
-        return;
-    }
-
-    const station = stationList[currentIndex];
-    const hasPosition = station.distance !== null;
-
-    let distanceText = 'Distance N/A';
-    if (hasPosition && !isNaN(station.distance)) {
-        const km = Math.round(station.distance);
-        const miles = Math.round(km * 0.621371);
-        distanceText = `${km}km/${miles}mi`; 
-    }
-
-    const stationHTML = `
-        <div class="station-name">${station.name}</div>
-        <div class="station-location">${station.location} <span class="text-gray">[${station.country}]</span></div>
-        <div class="station-meta">${station.language} <span class="text-gray">▪</span> ${station.timeUTC}z</div>
-        <div class="station-meta">${station.power}kW <span class="text-gray">▪</span> ${distanceText}</div>
-    `;
-
-    $aokiContent.html(stationHTML);
-    $aokiSource.text(station.source).show();
-
-    if (station.alternative_frequencies) {
-        displayAlternativeFrequencies(station.alternative_frequencies);
-    } else {
-        $afContainer.empty();
-    }
-
-    $counter.text(`${currentIndex + 1} / ${stationList.length}`);
-    $navControls.toggle(stationList.length > 1);
-
-    $aokiDisplay.css('cursor', hasPosition ? 'pointer' : 'default');
-}
-
-
-    function fetchAndDisplayAokiData(freqMHz){currentFreqKHz=Math.round(freqMHz*1000);const url=`${AOKI_API_URL}?freq=${currentFreqKHz}&lat=${qthLatitude}&lon=${qthLongitude}`;$.getJSON(url).done(data=>{if(currentMode!=='AM')return;if(data&&data.status==='success'&&data.stations&&data.stations.length>0){const newStationList=data.stations;if(!areStationListsEqual(stationList,newStationList)){currentIndex=0;}
-    stationList=newStationList;displayStation();}else{stationList=[];const errorMessage=data&&data.message?data.message:'No active stations found.';$aokiContent.html(`<h4 style="padding-top:25px;margin:0;">${errorMessage}</h4>`);$navControls.hide();$aokiSource.hide();$afContainer.empty();}}).fail(()=>{if(currentMode!=='AM')return;stationList=[];$aokiContent.html('<h4 style="padding-top:25px;margin:0;">Error loading data.</h4>');$navControls.hide();$aokiSource.hide();$afContainer.empty();});}
-
-	function handleFrequencyChange() {
-		clearTimeout(debounceTimer);
-		debounceTimer = setTimeout(() => {
-			const freqText = $('#data-frequency').text();
-			if (!freqText) return;
-			const freqMHz = parseFloat(freqText);
-			clearInterval(activityCheckInterval);
-			if (freqMHz <= AM_MAX_FREQ_MHZ) {
-				if (currentMode !== 'AM') {
-				currentMode = 'AM';
-				$('body').addClass('am-station-info-active');
-				$stationContainer.hide();
-				$aokiDisplay.show();
-				}
-			fetchAndDisplayAokiData(freqMHz);
-			activityCheckInterval = setInterval(function() {
-			fetchAndDisplayAokiData(freqMHz);
-			}, 10000);
-		} else {
-		if (currentMode !== 'FM') {
-			currentMode = 'FM';
-			$('body').removeClass('am-station-info-active');
-			$aokiDisplay.hide();
-			$stationContainer.show();
-			$afContainer.empty();
-			$tooltipText.hide().css('opacity', 0);
-			}
-		}
-		}, 100);
-	}
-
-
-    $aokiDisplay.off('click').on('click', e => {
-        if (!$(e.target).closest('button').length) {
-            const station = stationList[currentIndex];
-            if (station && station.distance !== null) {
-                openMapModalForStationOffline(station);
+        _closeMap() {
+            $('#aoki-map-modal').hide();
+            if (this.intervals.terminator) clearInterval(this.intervals.terminator);
+            if (this.mapState.map) {
+                this.mapState.map.remove();
+                this.mapState.map = null;
+                this.mapState.basemapLoaded = false; 
             }
         }
-    });
 
-    $prevButton.on('click', e => { e.stopPropagation(); currentIndex = (currentIndex - 1 + stationList.length) % stationList.length; displayStation(); });
-    $nextButton.on('click', e => { e.stopPropagation(); currentIndex = (currentIndex + 1) % stationList.length; displayStation(); });
-    $afContainer.on('click', '.alt-freq-item', function() { const freqKHz = $(this).data('freq'); if (freqKHz) tuneToFrequency(freqKHz); });
+        _fetchKpIndex() {
+            const $kp = $('#aoki-map-kp');
+            $kp.text('Kp: ...').css('color', '#ccc').show();
+            $.getJSON(CONFIG.auroraApi).done(data => {
+                let kp = data.th_30_kp || (data.ace ? data.ace.kp : null) || data.wing_kp;
+                if (kp !== null) {
+                    const val = parseFloat(kp);
+                    $kp.text(`Kp: ${val.toFixed(2)}`);
+                    if(val < 4) $kp.css('color', '#2ecc71');
+                    else if (val < 5) $kp.css('color', '#f1c40f');
+                    else $kp.css('color', '#e74c3c');
+                } else { $kp.text('Kp: N/A').css('color','#999'); }
+            });
+        }
 
-    fetchStaticData();
-    const targetNode = document.getElementById('data-frequency');
-    if (targetNode) {
-        const observer = new MutationObserver(handleFrequencyChange);
-        observer.observe(targetNode, { childList: true, subtree: true, characterData: true });
+        _ensureLeafletLoaded() {
+            const loadCSS = href => new Promise((res, rej) => { const l=document.createElement('link');l.rel='stylesheet';l.href=href;l.onload=res;l.onerror=rej;document.head.appendChild(l); });
+            const loadJS = src => new Promise((res, rej) => { const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s); });
+
+            if (window.L && window.L.terminator && window.arc && window.SunCalc) return Promise.resolve();
+            if (this.mapState.leafletReadyPromise) return this.mapState.leafletReadyPromise;
+            
+            this.mapState.leafletReadyPromise = loadCSS('/assets/leaflet/leaflet.css')
+                .then(() => loadJS('/assets/leaflet/leaflet.js'))
+                .then(() => loadJS('/assets/leaflet/L.Terminator.js'))
+                .then(() => loadJS('/assets/leaflet/arc.js'))
+                .then(() => loadJS('/assets/leaflet/SunCalc.js'));
+            return this.mapState.leafletReadyPromise;
+        }
+
+        _ensureLeafletMap() {
+            if (this.mapState.map) return;
+            this.mapState.map = L.map('aoki-map', { zoomControl: false, attributionControl: false });
+            L.control.zoom({ position: 'topright' }).addTo(this.mapState.map);
+            this.mapState.map.setView([20, 0], 2);
+            $('#aoki-map').css('background', '#BDE0FE');
+        }
+
+        _loadOfflineBasemapOnce() {
+            if (this.mapState.basemapLoaded) return Promise.resolve();
+            const fetchJson = url => fetch(url).then(r => r.json());
+            
+            const countries = fetchJson('/assets/world_countries_50m.geojson').then(geo => {
+                L.geoJSON(geo, {
+                    style: { color: '#3f3f3f', weight: 1, opacity: 1, fillColor: '#f2e9d8', fillOpacity: 0.8 },
+                    onEachFeature: (f, l) => { if(f.properties.NAME) l.bindTooltip(f.properties.NAME, { permanent: true, direction: 'center', className: 'country-label' }); }
+                }).addTo(this.mapState.map);
+            });
+
+            const places = fetchJson('/assets/places_rich.geojson').then(geo => {
+                const readRank = p => (p?.SCALERANK == null ? 3 : +p.SCALERANK);
+                const isBig = p => readRank(p) <= 2;
+                const isMed = p => readRank(p) > 2 && readRank(p) <= 4;
+                const mk = (filterFn) => L.geoJSON(geo, {
+                    filter: f => filterFn(f.properties || {}),
+                    pointToLayer: (feature, latlng) => L.marker(latlng, {
+                        icon: L.divIcon({ className: 'ne-place-label', html: `<span>${feature.properties?.NAME || ''}</span>`, iconSize: [0, 0] }),
+                        keyboard: false, interactive: false
+                    })
+                });
+                
+                this.mapState.layers.placesBig = mk(isBig);
+                this.mapState.layers.placesMed = mk(isMed);
+                this.mapState.layers.placesSmall = mk(p => !isBig(p) && !isMed(p));
+                
+                const update = () => {
+                    const z = this.mapState.map.getZoom();
+                    if (z >= 3 && !this.mapState.map.hasLayer(this.mapState.layers.placesBig)) this.mapState.map.addLayer(this.mapState.layers.placesBig);
+                    else if (z < 3 && this.mapState.map.hasLayer(this.mapState.layers.placesBig)) this.mapState.map.removeLayer(this.mapState.layers.placesBig);
+                    
+                    if (z >= 5 && !this.mapState.map.hasLayer(this.mapState.layers.placesMed)) this.mapState.map.addLayer(this.mapState.layers.placesMed);
+                    else if (z < 5 && this.mapState.map.hasLayer(this.mapState.layers.placesMed)) this.mapState.map.removeLayer(this.mapState.layers.placesMed);
+                    
+                    if (z >= 7 && !this.mapState.map.hasLayer(this.mapState.layers.placesSmall)) this.mapState.map.addLayer(this.mapState.layers.placesSmall);
+                    else if (z < 7 && this.mapState.map.hasLayer(this.mapState.layers.placesSmall)) this.mapState.map.removeLayer(this.mapState.layers.placesSmall);
+                };
+                this.mapState.map.on('zoomend', update);
+                update();
+            }).catch(err => console.error('Places load failed', err));
+
+            this.mapState.basemapLoaded = true;
+            return Promise.all([countries, places]);
+        }
+
+        _getDynamicProfile() {
+            const now = new Date();
+            const sunTimes = SunCalc.getTimes(now, this.qth.lat, this.qth.lon);
+            const timeline = DYNAMIC_PROFILE_MODEL.map(point => {
+                const eventTime = sunTimes[point.event];
+                const eventHours = eventTime.getHours() + eventTime.getMinutes() / 60;
+                return { ...point, time: eventHours + point.offsetHours };
+            }).sort((a, b) => a.time - b.time);
+            
+            timeline.unshift({ ...timeline[0], time: timeline[0].time - 24 });
+            timeline.push({ ...timeline[timeline.length - 1], time: timeline[timeline.length - 1].time + 24 });
+
+            const cur = now.getHours() + now.getMinutes() / 60;
+            let before = timeline[0], after = timeline[timeline.length - 1];
+            for (let i = 0; i < timeline.length; i++) {
+                if (timeline[i].time <= cur) before = timeline[i];
+                if (timeline[i].time >= cur) { after = timeline[i]; break; }
+            }
+            
+            const p = (cur - before.time) / (after.time - before.time);
+            const lerp = (a, b) => a + (b - a) * p;
+            const luf = lerp(before.luf, after.luf);
+            const muf = lerp(before.muf, after.muf);
+            const gs = lerp(before.greenStart, after.greenStart);
+            const ge = lerp(before.greenEnd, after.greenEnd);
+            const bw = muf - luf;
+            
+            return { luf, muf, greenStartsAt: (gs-luf)/(bw||1), greenEndsAt: (ge-luf)/(bw||1) };
+        }
+
+        _updatePropagationGraph(profile) {
+            const max = 27;
+            const bw = profile.muf - profile.luf;
+            const yLow = profile.luf + (bw * profile.greenStartsAt);
+            const gEnd = profile.luf + (bw * profile.greenEndsAt);
+            $('#graph-red-luf').css('width', (profile.luf/max)*100+'%');
+            $('#graph-yellow-low').css('width', ((yLow-profile.luf)/max)*100+'%');
+            $('#graph-green-optimal').css('width', ((gEnd-yLow)/max)*100+'%');
+            $('#graph-yellow-high').css('width', ((profile.muf-gEnd)/max)*100+'%');
+            $('#graph-red-muf').css('width', (100 - (profile.muf/max)*100)+'%');
+        }
+
+        _updateFrequencyMarker(freq, profile) {
+            const pct = (freq/1000 / 27) * 100;
+            $('#frequency-pointer-top').css('left', pct+'%').show();
+            $('#frequency-pointer-bottom').css('left', pct+'%').show();
+            $('#frequency-line').css('left', pct+'%').show();
+            
+            const fMhz = freq/1000;
+            const bw = profile.muf - profile.luf;
+            const yLow = profile.luf + (bw * profile.greenStartsAt);
+            const gEnd = profile.luf + (bw * profile.greenEndsAt);
+            
+            let c = '#c0392b';
+            if (fMhz < profile.luf || fMhz > profile.muf) c = '#fff';
+            else if (fMhz < yLow || fMhz > gEnd) c = '#3498db';
+            $('#frequency-line').css('background', c);
+        }
     }
-    setTimeout(handleFrequencyChange, 1000);
-    console.log('AM-Station-Info v1.2.1 - Loaded and Ready.');
-  });
+
+    $(document).ready(() => { new AmStationPlugin().init(); });
 })();
