@@ -1,4 +1,4 @@
-// AM-Station-Info v1.3
+// AM-Station-Info v1.3.1
 // -----------------------------------------------------------------------
 
 (() => {
@@ -7,7 +7,7 @@
     // --- Configuration ---
     const CONFIG = {
         name: 'AM-Station-Info',
-        version: '1.3',
+        version: '1.3.1',
         apiEndpoint: '/aoki-api-proxy',
         auroraApi: 'https://api.auroras.live/v1/?type=all&lat=60.0&long=10.0&forecast=false',
         maxFreq: 27
@@ -37,9 +37,12 @@
                 selectedList: 'all',
                 freqMargin: 0,
                 useMiles: false,
+                hideInactive: false,
                 showKp: true,
                 showTerminator: true,
                 showPath: true,
+                showCountryLabels: true,
+                showCapitalLabels: true,
                 showGraph: true,
                 extendedInfo: true
             };
@@ -87,18 +90,14 @@
             <div id="${this.overlayId}" class="am-native-modal" style="display:none;">
                 <div class="am-native-content">
                     
-                    <!-- Header -->
                     <div class="am-native-header">
                         <span class="am-native-title">AM Station Settings</span>
                         <div class="am-native-close">&times;</div>
                     </div>
                     
-                    <!-- Scrollable Body -->
                     <div class="am-native-body">
-                        
                         <fieldset class="am-fieldset">
                             <legend>Database & Units</legend>
-                            
                             <div class="am-row">
                                 <label>Database List</label>
                                 <select id="am-set-list" class="am-native-input">
@@ -108,12 +107,10 @@
                                     <option value="mwlist">MWList Only</option>
                                 </select>
                             </div>
-                            
                             <div class="am-row">
                                 <label>Freq Margin (+/- kHz)</label>
                                 <input type="number" id="am-set-margin" class="am-native-input" min="0" max="10">
                             </div>
-                            
                             <div class="am-row">
                                 <label>Distance Unit</label>
                                 <select id="am-set-unit" class="am-native-input">
@@ -121,6 +118,7 @@
                                     <option value="mi">Miles (mi)</option>
                                 </select>
                             </div>
+                            ${mkSwitch('am-set-hide-inactive', 'Hide 0kW listings')}
                         </fieldset>
 
                         <fieldset class="am-fieldset">
@@ -128,17 +126,16 @@
                             ${mkSwitch('am-set-kp', 'Show Kp Index')}
                             ${mkSwitch('am-set-terminator', 'Show Day/Night Terminator')}
                             ${mkSwitch('am-set-path', 'Show Signal Path (Line)')}
+                            ${mkSwitch('am-set-country-lbl', 'Show Country Names')}
+                            ${mkSwitch('am-set-capital-lbl', 'Show Capital Names')}
                             ${mkSwitch('am-set-graph', 'Show Prop. Graph (Footer)')}
                             ${mkSwitch('am-set-extended', 'Auto-open Info Box')}
                         </fieldset>
-
                     </div>
                     
-                    <!-- Fixed Footer -->
                     <div class="am-native-footer">
                         <button id="am-save-btn" class="am-native-button">Save & Close</button>
                     </div>
-
                 </div>
             </div>`;
 
@@ -156,9 +153,12 @@
             $('#am-set-list').val(this.settings.get('selectedList'));
             $('#am-set-margin').val(this.settings.get('freqMargin'));
             $('#am-set-unit').val(this.settings.get('useMiles') ? 'mi' : 'km');
+            $('#am-set-hide-inactive').prop('checked', this.settings.get('hideInactive'));
             $('#am-set-kp').prop('checked', this.settings.get('showKp'));
             $('#am-set-terminator').prop('checked', this.settings.get('showTerminator'));
             $('#am-set-path').prop('checked', this.settings.get('showPath'));
+            $('#am-set-country-lbl').prop('checked', this.settings.get('showCountryLabels'));
+            $('#am-set-capital-lbl').prop('checked', this.settings.get('showCapitalLabels'));
             $('#am-set-graph').prop('checked', this.settings.get('showGraph'));
             $('#am-set-extended').prop('checked', this.settings.get('extendedInfo'));
             
@@ -175,9 +175,12 @@
             this.settings.set('selectedList', $('#am-set-list').val());
             this.settings.set('freqMargin', parseInt($('#am-set-margin').val(), 10));
             this.settings.set('useMiles', $('#am-set-unit').val() === 'mi');
+            this.settings.set('hideInactive', $('#am-set-hide-inactive').is(':checked'));
             this.settings.set('showKp', $('#am-set-kp').is(':checked'));
             this.settings.set('showTerminator', $('#am-set-terminator').is(':checked'));
             this.settings.set('showPath', $('#am-set-path').is(':checked'));
+            this.settings.set('showCountryLabels', $('#am-set-country-lbl').is(':checked'));
+            this.settings.set('showCapitalLabels', $('#am-set-capital-lbl').is(':checked'));
             this.settings.set('showGraph', $('#am-set-graph').is(':checked'));
             this.settings.set('extendedInfo', $('#am-set-extended').is(':checked'));
             this.onSave();
@@ -200,12 +203,14 @@
             this.currentFreqKHz = 0;
             this.isLocked = false;
             this.lockedStationName = '';
+			this.lastInteractionTime = 0;
             
             this.intervals = { activity: null, terminator: null };
             
+            // NOTE: 'capitals' replaces the old big/med/small layers
             this.mapState = {
                 map: null,
-                layers: { terminator: null, line: null, qth: null, tx: null, placesBig: null, placesMed: null, placesSmall: null },
+                layers: { terminator: null, line: null, qth: null, tx: null, capitals: null },
                 basemapLoaded: false,
                 leafletReadyPromise: null
             };
@@ -226,210 +231,81 @@
                 observer.observe(targetNode, { childList: true, subtree: true, characterData: true });
             }
             setTimeout(() => this._handleFrequencyChange(), 1000);
-            console.log('AM-Station-Info v1.3 initialized.');
+            console.log(`AM-Station-Info v${CONFIG.version} initialized.`);
         }
 
         onSettingsChanged() {
+            // Reload map visuals immediately if open
+            if ($('#aoki-map-modal').is(':visible')) {
+                this._updateMapVisuals(); 
+            }
             this._handleFrequencyChange();
         }
 
         _injectCombinedStyles() {
             const css = `
             /* --- NATIVE SERVER STYLE MODAL (SCOPED & COMPACT) --- */
-            
-            .am-native-modal {
-                display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                background-color: rgba(0, 0, 0, 0.6);
-                opacity: 0; transition: opacity 0.3s ease;
-                z-index: 20000; color: var(--color-4);
-                backdrop-filter: blur(10px);
-            }
+            .am-native-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.6); opacity: 0; transition: opacity 0.3s ease; z-index: 20000; color: var(--color-4); backdrop-filter: blur(10px); }
             .am-native-modal.visible { opacity: 1; }
-
-            .am-native-content {
-                box-sizing: border-box; position: absolute;
-                top: 50%; left: 50%; transform: translate(-50%, -50%);
-                background-color: var(--color-main);
-                padding: 20px; border-radius: 15px;
-                min-width: 480px; max-width: 95%; 
-                max-height: 85vh;
-                display: flex; flex-direction: column;
-                box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-                border: 1px solid var(--color-4);
-            }
-
-            .am-native-header { 
-                margin-bottom: 15px; position: relative; height: 30px; 
-                flex-shrink: 0;
-            }
+            .am-native-content { box-sizing: border-box; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: var(--color-main); padding: 20px; border-radius: 15px; min-width: 480px; max-width: 95%; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,0.5); border: 1px solid var(--color-4); }
+            .am-native-header { margin-bottom: 15px; position: relative; height: 30px; flex-shrink: 0; }
             .am-native-title { font-size: 20px; font-weight: 300; position: absolute; left: 0; top: 5px; }
-            
-            /* Styled Close Button */
-            .am-native-close {
-                position: absolute; top: 0; right: 0;
-                width: 32px; height: 32px;
-                background-color: var(--color-2);
-                border: 1px solid var(--color-4);
-                border-radius: 5px;
-                cursor: pointer; font-size: 20px; line-height: 28px;
-                text-align: center; color: var(--color-text);
-                transition: 0.3s ease background-color;
-            }
+            .am-native-close { position: absolute; top: 0; right: 0; width: 32px; height: 32px; background-color: var(--color-2); border: 1px solid var(--color-4); border-radius: 5px; cursor: pointer; font-size: 20px; line-height: 28px; text-align: center; color: var(--color-text); transition: 0.3s ease background-color; }
             .am-native-close:hover { background-color: var(--color-4); color: var(--color-1); }
-
-            .am-native-body { 
-                flex-grow: 1; overflow-y: auto; 
-                margin-bottom: 10px; padding-right: 5px; 
-            }
-
-            .am-fieldset {
-                border: 2px solid var(--color-5);
-                border-radius: 10px;
-                padding: 10px 15px;
-                margin-bottom: 15px;
-                background: transparent;
-            }
-            .am-fieldset legend {
-                font-size: 1.0em; font-weight: bold;
-                color: var(--color-main-bright);
-                padding: 0 8px;
-            }
-
-            .am-row, .am-switch-row {
-                background-color: transparent; 
-                border-bottom: 1px solid rgba(255,255,255,0.15);
-                padding: 6px 0; margin-bottom: 2px;
-                display: flex; justify-content: space-between; align-items: center;
-            }
+            .am-native-body { flex-grow: 1; overflow-y: auto; margin-bottom: 10px; padding-right: 5px; }
+            .am-fieldset { border: 2px solid var(--color-5); border-radius: 10px; padding: 10px 15px; margin-bottom: 15px; background: transparent; }
+            .am-fieldset legend { font-size: 1.0em; font-weight: bold; color: var(--color-main-bright); padding: 0 8px; }
+            .am-row, .am-switch-row { background-color: transparent; border-bottom: 1px solid rgba(255,255,255,0.15); padding: 6px 0; margin-bottom: 2px; display: flex; justify-content: space-between; align-items: center; }
             .am-row:last-child, .am-switch-row:last-child { border-bottom: none; }
-            
-            .am-row label, .am-switch-text { 
-                font-size: 14px; font-weight: 500; color: var(--color-main-bright); 
-            }
-
-            .am-native-input {
-                width: 160px; height: 32px;
-                background-color: var(--color-4); color: var(--color-main);
-                border: none; border-radius: 15px;
-                padding: 0 10px; font-weight: bold; font-size: 13px;
-                cursor: pointer; outline: none;
-                transition: 0.35s ease background-color;
-            }
+            .am-row label, .am-switch-text { font-size: 14px; font-weight: 500; color: var(--color-main-bright); }
+            .am-native-input { width: 160px; height: 32px; background-color: var(--color-4); color: var(--color-main); border: none; border-radius: 15px; padding: 0 10px; font-weight: bold; font-size: 13px; cursor: pointer; outline: none; transition: 0.35s ease background-color; }
             .am-native-input:hover { background-color: var(--color-main-bright); }
             .am-native-input option { background-color: var(--color-main); color: var(--color-4); }
-
             .switch { user-select: none; }
             .switch input[type=checkbox] { height: 0; width: 0; margin: 0; visibility: hidden; position: absolute; }
-            .switch label {
-                cursor: pointer;
-                min-width: 54px; max-width: 54px; height: 30px;
-                background-color: var(--color-1);
-                transition: 0.35s background-color;
-                display: block; border-radius: 24px;
-                margin: 0; position: relative;
-                border: 2px solid var(--color-3);
-            }
-            .switch label::after {
-                content: ""; position: absolute; top: 3px; left: 3px;
-                width: 20px; height: 20px;
-                background: var(--color-5);
-                border-radius: 50%; transition: 0.3s;
-            }
+            .switch label { cursor: pointer; min-width: 54px; max-width: 54px; height: 30px; background-color: var(--color-1); transition: 0.35s background-color; display: block; border-radius: 24px; margin: 0; position: relative; border: 2px solid var(--color-3); }
+            .switch label::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; background: var(--color-5); border-radius: 50%; transition: 0.3s; }
             .switch input[type=checkbox]:checked + label { background: var(--color-4); }
-            .switch input[type=checkbox]:checked + label::after {
-                left: calc(100% - 3px); transform: translateX(-100%);
-                background-color: var(--color-1);
-            }
-
-            .am-native-footer {
-                flex-shrink: 0; padding-top: 10px;
-                border-top: 1px solid rgba(255,255,255,0.1);
-                text-align: right;
-            }
-
-            .am-native-button {
-                width: 130px; height: 40px;
-                border-radius: 12px;
-                background: var(--color-4); color: var(--color-main);
-                font-weight: bold; border: 0;
-                transition: 0.35s ease background; cursor: pointer;
-            }
+            .switch input[type=checkbox]:checked + label::after { left: calc(100% - 3px); transform: translateX(-100%); background-color: var(--color-1); }
+            .am-native-footer { flex-shrink: 0; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); text-align: right; }
+            .am-native-button { width: 130px; height: 40px; border-radius: 12px; background: var(--color-4); color: var(--color-main); font-weight: bold; border: 0; transition: 0.35s ease background; cursor: pointer; }
             .am-native-button:hover { background: var(--color-5); }
+            @media (max-width: 500px) { .am-native-content { min-width: 90%; padding: 15px; } .am-native-input { width: 120px; } }
 
-            @media (max-width: 500px) {
-                .am-native-content { min-width: 90%; padding: 15px; }
-                .am-native-input { width: 120px; }
-            }
-
-            /* --- V1 ORIGINAL MAP & PANEL CSS --- */
+            /* --- PANEL STYLES --- */
             #aoki-plugin-display { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: var(--color-1); z-index: 1010; color: var(--color-text); box-sizing: border-box; display: none; text-align: center; border-radius: 15px; padding: 0px 10px; cursor: pointer; }
             #am-settings-gear { position: absolute; top: 5px; right: 5px; font-size: 16px; opacity: 0; transition: opacity 0.2s; cursor: pointer; z-index: 1020; color: var(--color-4); }
             #aoki-plugin-display:hover #am-settings-gear { opacity: 1; }
-
             #aoki-station-content { display: flex; flex-direction: column; justify-content: flex-start; height: 100%; }
             .station-name { margin-top: -3px; font-size: 1.4em; font-weight: bold; text-transform: uppercase; margin-bottom: 0px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--color-4); }
             .station-location { font-size: 0.9em; margin-top: -5px; margin-bottom: 0px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
             .station-meta { font-size: 0.9em; margin-top: -7px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-            
-            /* Centered Nav Controls */
-            #aoki-nav-controls { 
-                position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
-                display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: default; 
-            }
+            #aoki-nav-controls { position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: default; }
             #aoki-nav-controls button { display: flex; align-items: center; justify-content: center; background: none; border: 1px solid var(--color-text); border-radius: 5px; color: var(--color-text); line-height: 1; cursor: pointer; opacity: 0.7; font-size: 13px; height: 26px; }
             #aoki-nav-controls button.nav-btn { width: 34px; }
             #aoki-nav-controls button:hover { opacity: 1; background-color: rgba(255,255,255,0.1); }
-            
-            /* Lock Button - Positioned Right */
-            #aoki-lock-btn { 
-                position: absolute; bottom: 5px; right: 5px; width: 26px; height: 26px;
-                display: flex; align-items: center; justify-content: center; background: none;
-                border: 1px solid var(--color-text); border-radius: 5px; color: var(--color-text);
-                cursor: pointer; opacity: 0.7; font-size: 13px;
-            }
+            #aoki-lock-btn { position: absolute; bottom: 5px; right: 5px; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; background: none; border: 1px solid var(--color-text); border-radius: 5px; color: var(--color-text); cursor: pointer; opacity: 0.7; font-size: 13px; }
             #aoki-lock-btn:hover { opacity: 1; background-color: rgba(255,255,255,0.1); }
             #aoki-lock-btn.locked { background-color: var(--color-4); color: var(--color-1); border-color: var(--color-4); opacity: 1; }
-            
             #aoki-source-display { position: absolute; bottom: 0px; left: 5px; font-size: 11px; opacity: 0.6; cursor: default; }
-            
             .alt-freq-list { height: calc(100% - 50px); overflow-y: auto; font-size: 14px; }
             .alt-freq-item { padding: 4px 0; cursor: pointer; border-radius: 5px; }
             .alt-freq-item:hover { background-color: rgba(255, 255, 255, 0.1); }
-            
-            /* COLOR 5 FOR ACTIVE FREQUENCY */
-            .alt-freq-item.active-freq { 
-                font-weight: bold; color: var(--color-5); 
-                background-color: rgba(255, 255, 255, 0.05); 
-                cursor: default; pointer-events: none; 
-                border: 1px solid rgba(255,255,255,0.1); 
-            }
+            .alt-freq-item.active-freq { font-weight: bold; color: var(--color-5); background-color: rgba(255, 255, 255, 0.05); cursor: default; pointer-events: none; border: 1px solid rgba(255,255,255,0.1); }
+            #aoki-station-info-tooltip.aoki-tooltiptext { position: fixed; transform: translate(-50%, -100%); z-index: 5000; background-color: var(--color-2); border: 2px solid var(--color-3); color: var(--color-text); text-align: center; font-size: 14px; border-radius: 15px; padding: 8px 15px; opacity: 0; transition: opacity 0.3s ease; pointer-events: none; white-space: nowrap; }
 
-            /* TOOLTIP Z-INDEX FIX */
-            #aoki-station-info-tooltip.aoki-tooltiptext {
-                position: fixed; transform: translate(-50%, -100%); 
-                z-index: 5000; /* Lower than modal (20000) but higher than panel (1010) */
-                background-color: var(--color-2); border: 2px solid var(--color-3);
-                color: var(--color-text); text-align: center; font-size: 14px;
-                border-radius: 15px; padding: 8px 15px; opacity: 0;
-                transition: opacity 0.3s ease; pointer-events: none; white-space: nowrap;
-            }
-
-            /* KART & GRAF (V1 ORIGINAL) */
+            /* --- MAP & MODAL STYLES --- */
             #aoki-map-modal { position: fixed; inset: 0; z-index: 99998; display: none; }
             #aoki-map-modal .aoki-map-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, .6); backdrop-filter: blur(10px); }
             #aoki-map-modal .aoki-map-dialog { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; width: 75vw; height: 80vh; max-width: 1400px; max-height: 850px; background: var(--color-main); border-radius: 15px; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); overflow: hidden; z-index: 99999; }
-            
             .aoki-map-header { display: flex; justify-content: space-between; align-items: center; height: 45px; padding: 5px 10px; background-color: var(--color-2); border-bottom: 1px solid var(--color-4); flex-shrink: 0; }
             .header-left-group { display: flex; align-items: center; gap: 15px; }
             .aoki-map-title { font-size: 20px; font-weight: bold; color: var(--color-main-bright); }
             #aoki-map-kp { font-size: 14px; font-weight: bold; padding: 2px 8px; border-radius: 4px; background-color: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); display: none; }
-
             .aoki-map-close { width: 100px; height: 34px; border-radius: 15px; background-color: var(--color-3); border: 1px solid var(--color-4); color: var(--color-main-bright); font-size: 20px; font-weight: normal; display: flex; align-items: center; justify-content: center; line-height: 1; cursor: pointer; transition: 0.3s ease background-color, 0.3s ease color; }
             .aoki-map-close:hover { background-color: var(--color-5); color: var(--color-1); }
-            
             .aoki-map-footer { display: flex; align-items: center; justify-content: space-between; height: 45px; padding: 5px 10px; background-color: var(--color-2); border-top: 1px solid var(--color-4); flex-shrink: 0; gap: 10px; }
             .footer-data-left, .footer-data-right { flex: 0 0 100px; }
-            
             #propagation-graph-container { flex-grow: 1; position: relative; height: 100%; }
             #propagation-graph { display: flex; width: 100%; height: 20px; border-radius: 5px; overflow: hidden; border: 1px solid rgba(255,255,255,0.2); position: absolute; bottom: 0; }
             .graph-zone { height: 100%; transition: width 0.5s ease; }
@@ -449,12 +325,30 @@
             #frequency-pointer-top, #frequency-pointer-bottom { position: absolute; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; transform: translateX(-50%); display: none; }
             #frequency-pointer-top { border-top: 6px solid var(--color-4); }
             #frequency-pointer-bottom { border-bottom: 6px solid var(--color-4); }
-            
             #aoki-map { width: 100%; height: 100%; flex-grow: 1; }
             .leaflet-top.leaflet-right .leaflet-control-zoom { margin-top: 12px; margin-right: 12px; }
-            .country-label { background: transparent; border: none; box-shadow: none; color: rgba(0, 0, 0, 0.6); font-size: 14px; font-weight: bold; text-shadow: 0 0 2px #fff, 0 0 2px #fff; pointer-events: none; display: none; }
-            .leaflet-zoom-3 .country-label, .leaflet-zoom-4 .country-label, .leaflet-zoom-5 .country-label { display: block; }
-            .ne-place-label span { font-size: 12px; color: #f0f0f0; text-shadow: 0 1px 3px rgba(0, 0, 0, .9); white-space: nowrap; user-select: none; pointer-events: none; }
+            
+            .country-label {
+				background: transparent !important;
+				border: none !important;
+				box-shadow: none !important;
+				color: #333 !important;
+				font-size: 14px;
+				font-weight: bold;
+				text-shadow: 2px 0 0 #fff, -2px 0 0 #fff, 0 2px 0 #fff, 0 -2px 0 #fff, 1px 1px #fff, -1px -1px #fff, 1px -1px #fff, -1px 1px #fff;
+				pointer-events: none;
+				display: none;
+			}
+			/* SHOW LABELS AT ZOOM LEVEL 3+ */
+			.leaflet-zoom-3 .country-label,
+			.leaflet-zoom-4 .country-label,
+			.leaflet-zoom-5 .country-label,
+			.leaflet-zoom-6 .country-label { 
+				display: block !important; 
+			}
+            .hide-country-labels .country-label { display: none !important; }
+
+            .ne-place-label span { font-size: 11px; font-weight: bold; color: #333333; text-shadow: 1px 1px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff; white-space: nowrap; user-select: none; pointer-events: none; }
             
             #aoki-map-infobox { position: absolute; top: 60px; left: 15px; width: 280px; background: var(--color-1-transparent); border: 1px solid #777; border-radius: 8px; z-index: 100000; box-shadow: 0 2px 10px rgba(0, 0, 0, .5); color: var(--color-text); font-family: sans-serif; font-size: 14px; pointer-events: none; }
             #aoki-map-infobox > * { pointer-events: auto; }
@@ -471,11 +365,7 @@
             .leaflet-control-zoom-in { border-top-left-radius: 10px !important; border-top-right-radius: 10px !important; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
             .leaflet-control-zoom-out { border-bottom-left-radius: 10px !important; border-bottom-right-radius: 10px !important; border-top-left-radius: 0; border-top-right-radius: 0; border-top: none; }
             @media (max-width: 700px) { #aoki-map-modal .aoki-map-dialog { box-sizing: border-box; top: 10px; right: 10px; bottom: 10px; left: 10px; width: 95vw; height: 75vh; transform: none; } #aoki-map-infobox { width: 240px; left: 10px; top: 55px; } .aoki-map-title { font-size: 18px; } .aoki-map-close { width: 80px; } }
-            
-            /* --- MOBILE AF FIX --- */
-            @media (max-width: 600px) {
-                body.am-station-info-active #af-list { display: none !important; }
-            }
+            @media (max-width: 600px) { body.am-station-info-active #af-list { display: none !important; } }
             `;
             $('<style>').text(css).appendTo('head');
         }
@@ -493,23 +383,16 @@
             display.on('mouseenter mouseover mousemove', e => e.stopPropagation());
 
             const content = $('<div id="aoki-station-content"></div>');
-            
-            // --- UI CHANGES: Center Nav, Right Lock ---
             const nav = $('<div id="aoki-nav-controls"></div>');
             const btnPrev = $('<button class="nav-btn">&lt;</button>').click((e) => { e.stopPropagation(); this._nav(-1); });
             const btnNext = $('<button class="nav-btn">&gt;</button>').click((e) => { e.stopPropagation(); this._nav(1); });
-            
-            // Detached Lock Button
-            const btnLock = $('<button id="aoki-lock-btn" title="Lock Network">🔓</button>').click((e) => { e.stopPropagation(); this._toggleLock(); });
+            const btnLock = $('<button id="aoki-lock-btn" title="Lock Networks">🔓</button>').click((e) => { e.stopPropagation(); this._toggleLock(); });
             
             this.elements.counter = $('<span></span>');
-            
-            // Append Nav Items (No lock button here)
             nav.append(btnPrev, this.elements.counter, btnNext);
             
             this.elements.source = $('<span id="aoki-source-display"></span>');
             
-            // Append everything to display
             display.append(content, nav, btnLock, this.elements.source);
             container.parent().append(display);
             
@@ -528,7 +411,6 @@
             
             this._buildMapModal(); 
 
-            // FIX: Always open map and hide tooltip
             display.click((e) => {
                 if (!$(e.target).closest('button, #am-settings-gear').length) {
                     const st = this.stationList[this.currentIndex];
@@ -640,8 +522,18 @@
                         $('#data-station-container').hide();
                         this.elements.display.show();
                     }
+                    
                     this._fetchData(freqMHz);
-                    this.intervals.activity = setInterval(() => this._fetchData(freqMHz), 10000);
+
+                    this.intervals.activity = setInterval(() => {
+                        const timeSinceInteraction = Date.now() - this.lastInteractionTime;
+                        if (timeSinceInteraction < 60000) {
+                            return; 
+                        }
+
+                        this._fetchData(freqMHz);
+                    }, 10000);
+
                 } else {
                     if (this.currentMode !== 'FM') {
                         this.currentMode = 'FM';
@@ -668,33 +560,31 @@
                 if (data && data.status === 'success' && data.stations && data.stations.length > 0) {
                     let stations = data.stations;
                     const selectedList = this.settings.get('selectedList');
-                    
                     if (selectedList !== 'all') {
                         stations = stations.filter(s => {
                             const src = (s.source || '').toLowerCase();
-                            if (selectedList === 'aoki') return src.includes('aoki');
-                            if (selectedList === 'user') return src.includes('user');
-                            if (selectedList === 'mwlist') return src.includes('mwlist');
-                            return true;
+                            return src.includes(selectedList);
                         });
                     }
-
+                    if (this.settings.get('hideInactive')) {
+                        stations = stations.filter(s => {
+                            const p = parseFloat(s.power);
+                            return !isNaN(p) && p > 0;
+                        });
+                    }
                     stations.sort((a, b) => {
                         const pA = (a.power && !isNaN(a.power) && parseFloat(a.power) > 0) ? 1 : 0;
                         const pB = (b.power && !isNaN(b.power) && parseFloat(b.power) > 0) ? 1 : 0;
                         return pB - pA;
                     });
-
                     if (stations.length === 0) {
                         this._displayNoStations("No stations in selected list.");
                         return;
                     }
-
                     let foundLockedIndex = -1;
                     if (this.isLocked && this.lockedStationName) {
                         foundLockedIndex = stations.findIndex(s => s.name === this.lockedStationName);
                     }
-
                     if (!this._areListsEqual(this.stationList, stations)) {
                         this.currentIndex = (foundLockedIndex !== -1) ? foundLockedIndex : 0;
                     } else {
@@ -702,7 +592,6 @@
                             this.currentIndex = foundLockedIndex;
                         }
                     }
-
                     this.stationList = stations;
                     this._renderStation();
                 } else {
@@ -738,7 +627,6 @@
 
             let loc = station.location || 'N/A';
             if (loc.length > 24) loc = loc.substring(0, 24) + '...';
-            
             let power = (station.power !== null) ? station.power : 'N/A';
 
             const html = `
@@ -763,7 +651,6 @@
             let all = [...(freqs || [])];
             if(current) all.push(current);
             all = [...new Set(all)].sort((a,b)=>a-b);
-            
             if(all.length === 0) return;
             let html = '<div class="alt-freq-list">';
             all.forEach(f => {
@@ -773,7 +660,6 @@
             });
             html += '</div>';
             container.html(html);
-            
             container.find('.alt-freq-item').click((e) => {
                 if ($(e.target).hasClass('active-freq')) return;
                 const f = $(e.target).data('freq');
@@ -782,6 +668,7 @@
         }
 
         _nav(dir) {
+			this.lastInteractionTime = Date.now();
             if (this.stationList.length === 0) return;
             this.currentIndex = (this.currentIndex + dir + this.stationList.length) % this.stationList.length;
             if (this.isLocked) this.lockedStationName = this.stationList[this.currentIndex].name;
@@ -829,11 +716,19 @@
 
             await this._loadOfflineBasemapOnce();
             
+            // Visuals update
+            this._updateMapVisuals();
+
             if (this.settings.get('showGraph') || this.settings.get('showTerminator')) {
                 const updateDynamics = () => {
                     if (this.mapState.layers.terminator) this.mapState.layers.terminator.remove();
                     if (this.settings.get('showTerminator')) {
-                        this.mapState.layers.terminator = L.terminator({ fillOpacity: 0.35, color: '#051945' }).addTo(this.mapState.map);
+                        this.mapState.layers.terminator = L.terminator({ 
+							fillOpacity: 0.35, 
+							color: '#051945', 
+							interactive: false,
+                            pane: 'terminatorPane'
+						}).addTo(this.mapState.map);
                     }
 
                     if (this.settings.get('showGraph')) {
@@ -845,7 +740,7 @@
                     }
                 };
                 updateDynamics();
-                this.intervals.terminator = setInterval(updateDynamics, 60000);
+                this.intervals.terminator = setInterval(updateDynamics, 300000);
             }
 
             if (this.mapState.layers.line) this.mapState.map.removeLayer(this.mapState.layers.line);
@@ -853,18 +748,28 @@
             if (this.mapState.layers.tx) this.mapState.map.removeLayer(this.mapState.layers.tx);
             $('#aoki-map-infobox').remove();
 
-            this.mapState.layers.qth = L.circleMarker([this.qth.lat, this.qth.lon], { radius: 7, color: '#ffffff', weight: 2, fillColor: '#007bff', fillOpacity: 1.0 }).addTo(this.mapState.map).bindPopup('QTH');
+            const topPane = 'topVectorPane';
+
+            this.mapState.layers.qth = L.circleMarker([this.qth.lat, this.qth.lon], { 
+                radius: 7, color: '#ffffff', weight: 2, fillColor: '#007bff', fillOpacity: 1.0,
+                pane: topPane
+            }).addTo(this.mapState.map).bindPopup('QTH');
             
             const stLat = parseFloat(station.lat||station.latitude);
             const stLon = parseFloat(station.lon||station.longitude);
             const transmitterIcon = L.icon({ iconUrl: '/assets/leaflet/images/transmitter-icon.png', iconSize: [38, 38], iconAnchor: [19, 19], popupAnchor: [0, -30] });
-            this.mapState.layers.tx = L.marker([stLat, stLon], { icon: transmitterIcon }).addTo(this.mapState.map);
+            this.mapState.layers.tx = L.marker([stLat, stLon], { icon: transmitterIcon, pane: topPane }).addTo(this.mapState.map);
 
             if (this.settings.get('showPath')) {
                 const generator = new arc.GreatCircle({ x: this.qth.lon, y: this.qth.lat }, { x: stLon, y: stLat });
                 const lineData = generator.Arc(100, { offset: 10 });
                 const points = lineData.geometries[0].coords.map(c => [c[1], c[0]]);
-                this.mapState.layers.line = L.polyline(points, { weight: 3, opacity: 0.9, dashArray: '6,8' }).addTo(this.mapState.map);
+                this.mapState.layers.line = L.polyline(points, { 
+                    weight: 3, 
+                    color: '#FF0000',
+                    opacity: 0.8,
+                    pane: topPane 
+                }).addTo(this.mapState.map);
                 this.mapState.map.fitBounds(this.mapState.layers.line.getBounds(), { padding: [50, 50] });
             } else {
                  this.mapState.map.setView([stLat, stLon], 4);
@@ -933,10 +838,8 @@
         _ensureLeafletLoaded() {
             const loadCSS = href => new Promise((res, rej) => { const l=document.createElement('link');l.rel='stylesheet';l.href=href;l.onload=res;l.onerror=rej;document.head.appendChild(l); });
             const loadJS = src => new Promise((res, rej) => { const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s); });
-
             if (window.L && window.L.terminator && window.arc && window.SunCalc) return Promise.resolve();
             if (this.mapState.leafletReadyPromise) return this.mapState.leafletReadyPromise;
-            
             this.mapState.leafletReadyPromise = loadCSS('/assets/leaflet/leaflet.css')
                 .then(() => loadJS('/assets/leaflet/leaflet.js'))
                 .then(() => loadJS('/assets/leaflet/L.Terminator.js'))
@@ -951,6 +854,42 @@
             L.control.zoom({ position: 'topright' }).addTo(this.mapState.map);
             this.mapState.map.setView([20, 0], 2);
             $('#aoki-map').css('background', '#BDE0FE');
+
+            // --- DEFINE Z-INDEX ORDER HERE ---
+            // 400: Default Overlay (Countries/Borders)
+            // 550: Terminator (Night shadow)
+            // 600: Default Marker (Leaflet markers)
+            // 650: Top Vector (Our lines and QTH circle)
+
+            this.mapState.map.createPane('terminatorPane');
+            this.mapState.map.getPane('terminatorPane').style.zIndex = 550;
+            this.mapState.map.getPane('terminatorPane').style.pointerEvents = 'none';
+
+            this.mapState.map.createPane('topVectorPane');
+            this.mapState.map.getPane('topVectorPane').style.zIndex = 650;
+            this.mapState.map.getPane('topVectorPane').style.pointerEvents = 'none';
+
+            const updateZoomClass = () => {
+                const z = this.mapState.map.getZoom();
+                const container = this.mapState.map.getContainer();
+                for (let i = 0; i <= 20; i++) container.classList.remove('leaflet-zoom-' + i);
+                container.classList.add('leaflet-zoom-' + z);
+            };
+            this.mapState.map.on('zoomend', updateZoomClass);
+            updateZoomClass();
+        }
+
+        _updateMapVisuals() {
+            if (!this.mapState.map) return;
+            const mapContainer = this.mapState.map.getContainer();
+            // Toggle country labels class
+            if (this.settings.get('showCountryLabels')) {
+                mapContainer.classList.remove('hide-country-labels');
+            } else {
+                mapContainer.classList.add('hide-country-labels');
+            }
+            // Trigger zoom event to re-check capitals layer
+            this.mapState.map.fire('zoomend');
         }
 
         _loadOfflineBasemapOnce() {
@@ -958,38 +897,88 @@
             const fetchJson = url => fetch(url).then(r => r.json());
             
             const countries = fetchJson('/assets/world_countries_50m.geojson').then(geo => {
-                L.geoJSON(geo, {
-                    style: { color: '#3f3f3f', weight: 1, opacity: 1, fillColor: '#f2e9d8', fillOpacity: 0.8 },
-                    onEachFeature: (f, l) => { if(f.properties.NAME) l.bindTooltip(f.properties.NAME, { permanent: true, direction: 'center', className: 'country-label' }); }
+                const geoJsonLayer = L.geoJSON(geo, {
+                    style: { 
+                        color: '#3f3f3f', 
+                        weight: 1, 
+                        opacity: 1, 
+                        fillColor: '#f2e9d8', 
+                        fillOpacity: 0.8 
+                    },
+                    onEachFeature: (feature, layer) => {
+                        let labelLatlng;
+                        if (feature.geometry.type === 'Polygon') {
+                            labelLatlng = layer.getBounds().getCenter();
+                        } else if (feature.geometry.type === 'MultiPolygon') {
+                            let largestPolyIndex = 0;
+                            let maxPoints = 0;
+                            const coords = feature.geometry.coordinates;
+                            for (let i = 0; i < coords.length; i++) {
+                                if (coords[i][0].length > maxPoints) {
+                                    maxPoints = coords[i][0].length;
+                                    largestPolyIndex = i;
+                                }
+                            }
+                            const ring = coords[largestPolyIndex][0];
+                            let bounds = L.latLngBounds();
+                            ring.forEach(pt => bounds.extend([pt[1], pt[0]]));
+                            labelLatlng = bounds.getCenter();
+                        }
+
+                        if (feature.properties.NAME === 'Norway') {
+                            labelLatlng = L.latLng(61.5, 8.5); 
+                        }
+
+                        if (feature.properties.NAME && labelLatlng) {
+                            const labelMarker = L.marker(labelLatlng, {
+                                icon: L.divIcon({ className: 'country-label-wrapper', html: '', iconSize: [0,0] }), 
+                                interactive: false 
+                            }).addTo(this.mapState.map);
+
+                            labelMarker.bindTooltip(feature.properties.NAME, { 
+                                permanent: true, 
+                                direction: 'center', 
+                                className: 'country-label',
+                                interactive: false
+                            });
+                        }
+
+                        layer.on({
+                            mouseover: (e) => {
+                                const l = e.target;
+                                l.setStyle({ weight: 2, color: '#666', fillOpacity: 1.0, fillColor: '#ffffff' });
+                                l.bringToFront(); 
+                            },
+                            mouseout: (e) => { geoJsonLayer.resetStyle(e.target); },
+                            click: (e) => { this.mapState.map.fitBounds(e.target.getBounds()); }
+                        });
+                    }
                 }).addTo(this.mapState.map);
             });
 
-            const places = fetchJson('/assets/places_rich.geojson').then(geo => {
-                const readRank = p => (p?.SCALERANK == null ? 3 : +p.SCALERANK);
-                const isBig = p => readRank(p) <= 2;
-                const isMed = p => readRank(p) > 2 && readRank(p) <= 4;
-                const mk = (filterFn) => L.geoJSON(geo, {
-                    filter: f => filterFn(f.properties || {}),
+            const places = fetchJson('/assets/capitals.geojson').then(geo => {
+                const mk = () => L.geoJSON(geo, {
                     pointToLayer: (feature, latlng) => L.marker(latlng, {
                         icon: L.divIcon({ className: 'ne-place-label', html: `<span>${feature.properties?.NAME || ''}</span>`, iconSize: [0, 0] }),
                         keyboard: false, interactive: false
                     })
                 });
                 
-                this.mapState.layers.placesBig = mk(isBig);
-                this.mapState.layers.placesMed = mk(isMed);
-                this.mapState.layers.placesSmall = mk(p => !isBig(p) && !isMed(p));
+                this.mapState.layers.capitals = mk();
                 
                 const update = () => {
                     const z = this.mapState.map.getZoom();
-                    if (z >= 3 && !this.mapState.map.hasLayer(this.mapState.layers.placesBig)) this.mapState.map.addLayer(this.mapState.layers.placesBig);
-                    else if (z < 3 && this.mapState.map.hasLayer(this.mapState.layers.placesBig)) this.mapState.map.removeLayer(this.mapState.layers.placesBig);
-                    
-                    if (z >= 5 && !this.mapState.map.hasLayer(this.mapState.layers.placesMed)) this.mapState.map.addLayer(this.mapState.layers.placesMed);
-                    else if (z < 5 && this.mapState.map.hasLayer(this.mapState.layers.placesMed)) this.mapState.map.removeLayer(this.mapState.layers.placesMed);
-                    
-                    if (z >= 7 && !this.mapState.map.hasLayer(this.mapState.layers.placesSmall)) this.mapState.map.addLayer(this.mapState.layers.placesSmall);
-                    else if (z < 7 && this.mapState.map.hasLayer(this.mapState.layers.placesSmall)) this.mapState.map.removeLayer(this.mapState.layers.placesSmall);
+                    const showCapitals = this.settings.get('showCapitalLabels');
+
+                    if (z >= 3 && showCapitals) {
+                        if (!this.mapState.map.hasLayer(this.mapState.layers.capitals)) {
+                            this.mapState.map.addLayer(this.mapState.layers.capitals);
+                        }
+                    } else {
+                        if (this.mapState.map.hasLayer(this.mapState.layers.capitals)) {
+                            this.mapState.map.removeLayer(this.mapState.layers.capitals);
+                        }
+                    }
                 };
                 this.mapState.map.on('zoomend', update);
                 update();
