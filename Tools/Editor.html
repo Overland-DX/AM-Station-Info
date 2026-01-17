@@ -570,85 +570,88 @@
 
     // --- FMLIST Import (Hardcoded to userlist1.csv structure) ---
     function loadFmlistFile(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
+		const file = e.target.files[0];
+		if (!file) return;
+		const reader = new FileReader();
+
+		const startFreqInput = document.getElementById('csvStartFrequency');
+		const startFreq = parseFloat(startFreqInput.value);
+
+		reader.onload = (ev) => {
+			const text = ev.target.result;
+			const lines = text.split(/\r?\n/);
+			const parsed = [];
         
-        const startFreqInput = document.getElementById('csvStartFrequency');
-        const startFreq = parseFloat(startFreqInput.value);
-
-        reader.onload = (ev) => {
-            const text = ev.target.result;
-            const lines = text.split(/\r?\n/);
-            const parsed = [];
-            
-            // Standard Perseus / FMSCAN userlist1.csv structure (semicolon separated)
-            // 0:Freq (Hz), 1:ITU, 2:Lang, 3:Name, 4:St/M, 5:Loc, 6:Lat, 7:Lon, 9:ERP
-            
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i].trim();
-                if (!line || line.startsWith('=')) continue; // Skip bad lines or headers
-                
-                const cols = line.split(';').map(c => c.replace(/"/g, '').trim());
-                if (cols.length < 9) continue; // Ensure enough columns
-
-                // 1. Frequency
-                let f = parseFloat(cols[0]);
-                if (isNaN(f)) continue;
-
-                // Conversion logic: if > 30000 assume Hz -> kHz.
-                if (f > 30000) f = f / 1000;
-                f = Math.round(f); 
-
-                // Filter logic
-                if (!isNaN(startFreq) && startFreq > 0) {
-                    if (f < startFreq) continue;
-                }
-
-                // 2. Coordinate Conversion (Dec -> DMS)
-                let lat = parseFloat(cols[6]);
-                let lon = parseFloat(cols[7]);
-                let latlonStr = "";
-                if (!isNaN(lat) && !isNaN(lon) && (lat !== 0 || lon !== 0)) {
-                    latlonStr = convertDecToDMS(lat, true) + convertDecToDMS(lon, false);
-                }
-
-                // 3. Power
-                let pwr = parseFloat(cols[9]);
-                if (isNaN(pwr)) pwr = null;
-
-                // 4. Build Object (Add time_utc default!)
-                parsed.push({
-                    frequency_khz: f,
-                    station: cols[3] || 'Unknown', // Col 3 Name
-                    time_utc: '0000-2400',         // FORCE 24/7 so it shows up on server
-                    days: '1234567',
-                    language: cols[2] || '',       // Col 2 Lang
-                    power_kw: pwr,                 // Col 9 Power
-                    azimuth: '',
-                    location: cols[5] || '',       // Col 5 Loc
-                    country_code: cols[1] || '',   // Col 1 ITU
-                    latlon: latlonStr,
-                    remarks: 'FMSCAN Import'
-                });
-            }
-
-            if (parsed.length === 0) {
-                alert("Parsed 0 stations. Please check if you uploaded the correct 'userlist1.csv' file.");
-                return;
-            }
-
-            stationData = parsed;
-            currentFilename = 'MWList.json'; 
-            applyFilters();
-            alert(`Successfully parsed ${parsed.length} stations from MWLIST CSV.\nFile will resolve as MWList.json.`);
-            
-            document.getElementById('fmlistInput').value = '';
-            startFreqInput.value = '';
-        };
+			// Standard Perseus / FMSCAN userlist1.csv structure (semicolon separated)
+			// 0:Freq (Hz), 1:ITU, 2:Lang, 3:Name, 4:St/M, 5:Loc, 6:Lat, 7:Lon, 9:ERP, 15:Time, 16:Days
         
-        reader.readAsText(file, 'ISO-8859-1'); 
-    }
+			for (let i = 0; i < lines.length; i++) {
+				const line = lines[i].trim();
+				if (!line || line.startsWith('=')) continue; 
+            
+				const cols = line.split(';').map(c => c.replace(/"/g, '').trim());
+            
+				if (cols.length < 10) continue; 
+
+				// 1. Frequency
+				let f = parseFloat(cols[0]);
+				if (isNaN(f)) continue;
+
+				if (f > 30000) f = f / 1000;
+				f = Math.round(f); 
+
+				if (!isNaN(startFreq) && startFreq > 0) {
+					if (f < startFreq) continue;
+				}
+
+				// 2. Coordinate Conversion
+				let lat = parseFloat(cols[6]);
+				let lon = parseFloat(cols[7]);
+				let latlonStr = "";
+				if (!isNaN(lat) && !isNaN(lon) && (lat !== 0 || lon !== 0)) {
+					latlonStr = convertDecToDMS(lat, true) + convertDecToDMS(lon, false);
+				}
+
+				// 3. Power
+				let pwr = parseFloat(cols[9]);
+				if (isNaN(pwr)) pwr = null;
+
+				// 4. Time and Days
+				const timeVal = cols[15] && cols[15] !== '' ? cols[15] : '0000-2400';
+				const daysVal = cols[16] && cols[16] !== '' ? cols[16] : '1234567';
+
+				// 5. Build Object
+				parsed.push({
+					frequency_khz: f,
+					station: cols[3] || 'Unknown', 
+					time_utc: timeVal,         
+					days: daysVal,
+					language: cols[2] || '',       
+					power_kw: pwr,                 
+					azimuth: '',
+					location: cols[5] || '',       
+					country_code: cols[1] || '',   
+					latlon: latlonStr,
+					remarks: 'FMSCAN Import'
+				});
+			}
+
+			if (parsed.length === 0) {
+				alert("Parsed 0 stations. Please check if you uploaded the correct 'userlist1.csv' file.");
+				return;
+			}
+
+			stationData = parsed;
+			currentFilename = 'MWList.json'; 
+			applyFilters();
+			alert(`Successfully parsed ${parsed.length} stations from MWLIST CSV.\nFile will resolve as MWList.json.`);
+        
+			document.getElementById('fmlistInput').value = '';
+			if (startFreqInput) startFreqInput.value = '';
+		};
+    
+		reader.readAsText(file, 'ISO-8859-1'); 
+	}
 
     function convertDecToDMS(val, isLat) {
         const dir = val >= 0 ? (isLat ? 'N' : 'E') : (isLat ? 'S' : 'W');
