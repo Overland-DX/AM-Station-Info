@@ -1,5 +1,5 @@
 /*
-    AM Station Info Plugin v1.3 (Server)
+    AM Station Info Plugin v1.4 (Server)
     Server-side code - Now reads from /databases/ directory
     Updates: 
     - MWList source name support
@@ -7,6 +7,7 @@
     - Missing power ("N/A") sorts normally by distance.
     - EXACT frequency matching (no +/- 2kHz tolerance)
     - Fix: Stations with missing time in DB are treated as 24/7 active
+    - NEW: Range search for SW subbands with "Highest power per frequency" filtering
 */
 
 'use strict';
@@ -47,7 +48,7 @@ function parseLatLon(latlonStr) {
     }
 }
 
-let stasjonsData = [];
+let stasjonsData =[];
 const dbDirectory = path.join(__dirname, 'databases');
 
 try {
@@ -124,7 +125,6 @@ function beregnAvstand(lat1, lon1, lat2, lon2) {
 }
 
 function isTimeActive(timeUTC, currentTimeInMinutes) {
-    // FIX: Hvis tid mangler eller er tom, antar vi at stasjonen sender 24/7 (for FMLIST/User DB)
     if (!timeUTC || timeUTC.trim() === '') return true;
     
     if (timeUTC.indexOf('-') === -1) return false; 
@@ -147,43 +147,43 @@ function isTimeActive(timeUTC, currentTimeInMinutes) {
 }
 
 endpointsRouter.get('/aoki-api-proxy', (req, res) => {
-    const { lat, lon, freq } = req.query;
-    if (!lat || !lon || !freq) return res.status(400).json({ status: 'error', message: 'Missing parameters.' });
+    const { lat, lon, freq, freqStart, freqEnd } = req.query;
+    
+    if (!lat || !lon || (!freq && (!freqStart || !freqEnd))) {
+        return res.status(400).json({ status: 'error', message: 'Missing parameters.' });
+    }
+
     const now = new Date();
     const currentUTCDay = now.getUTCDay() + 1;
     const dayString = currentUTCDay.toString();
     const nowInMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-    const requestFreq = parseInt(freq, 10);
+    const margin = req.query.margin ? parseInt(req.query.margin, 10) : 0;
+    
     const userLat = parseFloat(lat);
     const userLon = parseFloat(lon);
     
+    const fStart = freqStart ? parseInt(freqStart, 10) : null;
+    const fEnd = freqEnd ? parseInt(freqEnd, 10) : null;
+    const requestFreq = freq ? parseInt(freq, 10) : null;
+    
     const filtrerteStasjoner = stasjonsData.filter(stasjon => {
-      // ENDRING: Kun nøyaktig frekvensmatch (ingen +/- 2 toleranse)
-      const freqMatch = stasjon.frequency_khz && stasjon.frequency_khz === requestFreq;
+      let freqMatch = false;
+      if (fStart !== null && fEnd !== null) {
+          freqMatch = stasjon.frequency_khz >= fStart && stasjon.frequency_khz <= fEnd;
+      } else if (requestFreq !== null) {
+          freqMatch = stasjon.frequency_khz && Math.abs(stasjon.frequency_khz - requestFreq) <= margin;
+      }
       
       const dayMatch  = stasjon.days_active && stasjon.days_active.includes(dayString);
       const timeMatch = isTimeActive(stasjon.time_utc, nowInMinutes);
       return freqMatch && dayMatch && timeMatch;
     });
 
-    if (filtrerteStasjoner.length === 0) return res.json({ status: 'success', message: 'No active stations found.', stations: [] });
+    if (filtrerteStasjoner.length === 0) return res.json({ status: 'success', message: 'No active stations found.', stations:[] });
 
-    const resultat = filtrerteStasjoner.map(stasjon => {
+    const bearbeidet = filtrerteStasjoner.map(stasjon => {
       const hasCoords = stasjon.latitude !== null && stasjon.longitude !== null;
-      const avstand = hasCoords 
-        ? beregnAvstand(userLat, userLon, stasjon.latitude, stasjon.longitude) 
-        : null;
-
-      const alternative_frequencies = stasjonsData
-        .filter(other =>
-          other.name === stasjon.name &&
-          other.frequency_khz !== stasjon.frequency_khz &&
-          other.days_active && other.days_active.includes(dayString) &&
-          isTimeActive(other.time_utc, nowInMinutes)
-        )
-        .map(alt => alt.frequency_khz);
-
-      const unikeAlternativer = [...new Set(alternative_frequencies)];
+      const avstand = hasCoords ? beregnAvstand(userLat, userLon, stasjon.latitude, stasjon.longitude) : null;
 
       return {
         name: stasjon.name,
@@ -191,14 +191,11 @@ endpointsRouter.get('/aoki-api-proxy', (req, res) => {
         country: stasjon.country,
         language: stasjon.language,
         timeUTC: stasjon.time_utc,
-        power: stasjon.power_kw, 
+        power: parseFloat(stasjon.power_kw) || 0,
         distance: avstand,
         source: stasjon.source,
-        alternative_frequencies: unikeAlternativer,
         latitude: stasjon.latitude,
         longitude: stasjon.longitude,
-        lat: stasjon.latitude,
-        lon: stasjon.longitude,
         frequency: stasjon.frequency_khz,
         days: stasjon.days_active,
         azimuth: stasjon.azimuth,
@@ -206,12 +203,39 @@ endpointsRouter.get('/aoki-api-proxy', (req, res) => {
       };
     });
 
-    // Sortering: 0-effekt nederst, ellers distanse
+    let resultat;
+
+    if (fStart !== null && fEnd !== null) {
+        const grouped = {};
+        bearbeidet.forEach(st => {
+            const f = st.frequency;
+            if (!grouped[f]) {
+                grouped[f] = st;
+            } else {
+                if (st.power > grouped[f].power) {
+                    grouped[f] = st;
+                }
+            }
+        });
+        resultat = Object.values(grouped);
+    } else {
+        resultat = bearbeidet.map(st => {
+            const altFreqs = stasjonsData
+                .filter(other =>
+                    other.name === st.name &&
+                    other.frequency_khz !== st.frequency &&
+                    other.days_active && other.days_active.includes(dayString) &&
+                    isTimeActive(other.time_utc, nowInMinutes)
+                ).map(alt => alt.frequency_khz);
+            return {
+                ...st,
+                alternative_frequencies: [...new Set(altFreqs)]
+            };
+        });
+    }
+
     resultat.sort((a, b) => {
-        const isZeroPower = (p) => {
-            if (p === 0 || p === "0") return true;
-            return false;
-        };
+        const isZeroPower = (p) => p === 0;
 
         const aIsZero = isZeroPower(a.power);
         const bIsZero = isZeroPower(b.power);
@@ -236,4 +260,4 @@ endpointsRouter.get('/aoki-api-proxy', (req, res) => {
     res.json({ status: 'success', stations: resultat });
 });
 
-logInfo(`${pluginName}: AM-Station-Info endpoint initialized (v1.3).`);
+logInfo(`${pluginName}: AM-Station-Info endpoint initialized (v1.4).`);
