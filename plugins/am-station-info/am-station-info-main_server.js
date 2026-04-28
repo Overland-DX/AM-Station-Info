@@ -1,5 +1,5 @@
 /*
-    AM Station Info Plugin v1.4 (Server)
+    AM Station Info Plugin v1.4.1 (Server)
     Server-side code - Now reads from /databases/ directory
     Updates: 
     - MWList source name support
@@ -149,6 +149,7 @@ function isTimeActive(timeUTC, currentTimeInMinutes) {
 endpointsRouter.get('/aoki-api-proxy', (req, res) => {
     const { lat, lon, freq, freqStart, freqEnd } = req.query;
     
+    // Vi må enten ha en spesifikk frekvens, eller en range for underbåndet.
     if (!lat || !lon || (!freq && (!freqStart || !freqEnd))) {
         return res.status(400).json({ status: 'error', message: 'Missing parameters.' });
     }
@@ -191,7 +192,7 @@ endpointsRouter.get('/aoki-api-proxy', (req, res) => {
         country: stasjon.country,
         language: stasjon.language,
         timeUTC: stasjon.time_utc,
-        power: parseFloat(stasjon.power_kw) || 0,
+        power: parseFloat(stasjon.power_kw) || 0, // Gjør det enkelt å sortere senere
         distance: avstand,
         source: stasjon.source,
         latitude: stasjon.latitude,
@@ -205,6 +206,7 @@ endpointsRouter.get('/aoki-api-proxy', (req, res) => {
 
     let resultat;
 
+    // Hvis vi har valgt et område (Analog Scale), filtrer kun til de sterkeste stasjonene per frekvens
     if (fStart !== null && fEnd !== null) {
         const grouped = {};
         bearbeidet.forEach(st => {
@@ -213,12 +215,13 @@ endpointsRouter.get('/aoki-api-proxy', (req, res) => {
                 grouped[f] = st;
             } else {
                 if (st.power > grouped[f].power) {
-                    grouped[f] = st;
+                    grouped[f] = st; // Overskriv med høyere effekt
                 }
             }
         });
         resultat = Object.values(grouped);
     } else {
+        // Enkelt-frekvens søk: behold alternativ-frekvens logikk
         resultat = bearbeidet.map(st => {
             const altFreqs = stasjonsData
                 .filter(other =>
@@ -234,6 +237,7 @@ endpointsRouter.get('/aoki-api-proxy', (req, res) => {
         });
     }
 
+    // Sortering: 0-effekt nederst, ellers distanse
     resultat.sort((a, b) => {
         const isZeroPower = (p) => p === 0;
 
@@ -258,6 +262,51 @@ endpointsRouter.get('/aoki-api-proxy', (req, res) => {
     });
 
     res.json({ status: 'success', stations: resultat });
+
 });
 
-logInfo(`${pluginName}: AM-Station-Info endpoint initialized (v1.4).`);
+const favoritesFile = path.join(dbDirectory, 'scale_favorites.json');
+
+function getFavorites() {
+    if (!fs.existsSync(favoritesFile)) return[];
+    try { return JSON.parse(fs.readFileSync(favoritesFile, 'utf8')); }
+    catch (e) { return[]; }
+}
+
+function saveFavorites(favs) {
+    fs.writeFileSync(favoritesFile, JSON.stringify(favs, null, 2));
+}
+
+const checkAdminAm = (req, res, next) => {
+    if (req.session && req.session.isAdminAuthenticated) return next();
+    return res.status(401).json({ error: 'Unauthorized' });
+};
+
+endpointsRouter.get('/AM-Station_info/api/auth-check', (req, res) => {
+    res.json({ isAdmin: (req.session && req.session.isAdminAuthenticated) || false });
+});
+
+endpointsRouter.get('/AM-Station_info/favorites', (req, res) => {
+    res.json(getFavorites());
+});
+
+endpointsRouter.post('/AM-Station_info/favorites/add', checkAdminAm, express.json(), (req, res) => {
+    const favs = getFavorites();
+    const station = req.body;
+    // Unngå duplikater
+    if (!favs.some(s => s.name === station.name && s.frequency === station.frequency)) {
+        favs.push(station);
+        saveFavorites(favs);
+    }
+    res.json({ success: true, favorites: favs });
+});
+
+endpointsRouter.post('/AM-Station_info/favorites/remove', checkAdminAm, express.json(), (req, res) => {
+    let favs = getFavorites();
+    const { name, frequency } = req.body;
+    favs = favs.filter(s => !(s.name === name && s.frequency === frequency));
+    saveFavorites(favs);
+    res.json({ success: true, favorites: favs });
+});
+
+logInfo(`${pluginName}: AM-Station-Info endpoint initialized (Range Search & Peak-Power filtering).`);
