@@ -1,4 +1,4 @@
-// AM-Station-Info v1.3.1
+// AM-Station-Info v1.4.1
 // -----------------------------------------------------------------------
 
 (() => {
@@ -7,7 +7,7 @@
     // --- Configuration ---
     const CONFIG = {
         name: 'AM-Station-Info',
-        version: '1.3.1',
+        version: '1.4.1',
         apiEndpoint: '/aoki-api-proxy',
         auroraApi: 'https://api.auroras.live/v1/?type=all&lat=60.0&long=10.0&forecast=false',
         maxFreq: 27
@@ -46,6 +46,8 @@
                 showGraph: true,
                 extendedInfo: true
             };
+            this.isAdmin = false;
+            this.favorites =[];
         }
         _loadSettings() {
             try { return JSON.parse(localStorage.getItem(this.storageKey)) || {}; } catch (e) { return {}; }
@@ -224,6 +226,9 @@
             this._injectCombinedStyles();
             this._buildUI();
             this._fetchStaticData();
+
+            $.getJSON('/AM-Station_info/api/auth-check').done(data => { this.isAdmin = data.isAdmin; }).fail(() => { this.isAdmin = false; });
+            this._loadFavorites();
             
             const targetNode = document.getElementById('data-frequency');
             if (targetNode) {
@@ -240,6 +245,13 @@
                 this._updateMapVisuals(); 
             }
             this._handleFrequencyChange();
+        }
+
+        _loadFavorites() {
+            $.getJSON('/AM-Station_info/favorites').done(data => {
+                this.favorites = data ||[];
+                if(this.elements.content && this.elements.content.is(':visible')) this._renderStation();
+            });
         }
 
         _injectCombinedStyles() {
@@ -287,6 +299,8 @@
             #aoki-lock-btn { position: absolute; bottom: 5px; right: 5px; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; background: none; border: 1px solid var(--color-text); border-radius: 5px; color: var(--color-text); cursor: pointer; opacity: 0.7; font-size: 13px; }
             #aoki-lock-btn:hover { opacity: 1; background-color: rgba(255,255,255,0.1); }
             #aoki-lock-btn.locked { background-color: var(--color-4); color: var(--color-1); border-color: var(--color-4); opacity: 1; }
+            #aoki-fav-btn { position: absolute; bottom: 5px; right: 35px; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; background: none; border: 1px solid var(--color-text); border-radius: 5px; color: var(--color-text); cursor: pointer; opacity: 0.7; font-size: 13px; transition: 0.3s; }
+            #aoki-fav-btn:hover { opacity: 1; background-color: rgba(255,255,255,0.1); }
             #aoki-source-display { position: absolute; bottom: 0px; left: 5px; font-size: 11px; opacity: 0.6; cursor: default; }
             .alt-freq-list { height: calc(100% - 50px); overflow-y: auto; font-size: 14px; }
             .alt-freq-item { padding: 4px 0; cursor: pointer; border-radius: 5px; }
@@ -387,18 +401,20 @@
             const btnPrev = $('<button class="nav-btn">&lt;</button>').click((e) => { e.stopPropagation(); this._nav(-1); });
             const btnNext = $('<button class="nav-btn">&gt;</button>').click((e) => { e.stopPropagation(); this._nav(1); });
             const btnLock = $('<button id="aoki-lock-btn" title="Lock Networks">🔓</button>').click((e) => { e.stopPropagation(); this._toggleLock(); });
+            const btnFav = $('<button id="aoki-fav-btn" style="display:none;"></button>').click((e) => { e.stopPropagation(); this._toggleFavorite(); });
             
             this.elements.counter = $('<span></span>');
             nav.append(btnPrev, this.elements.counter, btnNext);
             
             this.elements.source = $('<span id="aoki-source-display"></span>');
             
-            display.append(content, nav, btnLock, this.elements.source);
+            display.append(content, nav, btnLock, btnFav, this.elements.source);
             container.parent().append(display);
             
             this.elements.display = display;
             this.elements.content = content;
             this.elements.lockBtn = btnLock;
+            this.elements.favBtn = btnFav;
             this.elements.nav = nav;
 
             const tooltipHTML = 'This panel only shows information about available<br>stations in the database, this is not RDS data.<br><br>Click to open local map.';
@@ -605,6 +621,7 @@
             this.elements.content.html(`<h4 style="padding-top:25px;margin:0;">${msg}</h4>`);
             this.elements.nav.hide();
             this.elements.source.hide();
+            this.elements.favBtn.hide();
             $('#af-list').empty();
         }
 
@@ -639,9 +656,20 @@
             this.elements.source.text(station.source).show();
             this.elements.nav.toggle(this.stationList.length > 0); 
             this.elements.counter.text(`${this.currentIndex + 1} / ${this.stationList.length}`);
-            
             const currentStationFreq = station.frequency || this.currentFreqKHz;
-            this._renderAfList(station.alternative_frequencies, currentStationFreq);
+            const isMWLW = currentStationFreq >= 144 && currentStationFreq <= 1701;
+            
+            if (this.isAdmin && isMWLW) {
+                this.elements.favBtn.show();
+                const isFav = this.favorites.some(f => f.name === station.name && f.frequency === currentStationFreq);
+                if (isFav) {
+                    this.elements.favBtn.html('❌').attr('title', 'Remove from Scale');
+                } else {
+                    this.elements.favBtn.html('⭐').attr('title', 'Add to Scale');
+                }
+            } else {
+                this.elements.favBtn.hide();
+            }
             this.elements.display.css('cursor', station.distance !== null ? 'pointer' : 'default');
         }
 
@@ -684,6 +712,38 @@
                 this.elements.lockBtn.removeClass('locked').html('🔓');
                 this.lockedStationName = '';
             }
+        }
+
+        _toggleFavorite() {
+            const st = this.stationList[this.currentIndex];
+            if(!st) return;
+            const fKHz = st.frequency || this.currentFreqKHz;
+            const isFav = this.favorites.some(f => f.name === st.name && f.frequency === fKHz);
+            const endpoint = isFav ? '/AM-Station_info/favorites/remove' : '/AM-Station_info/favorites/add';
+
+            $.ajax({
+                url: endpoint, type: 'POST', contentType: 'application/json',
+                data: JSON.stringify({ 
+                    name: st.name, 
+                    frequency: fKHz, 
+                    country: st.country, 
+                    location: st.location, 
+                    power: st.power,
+                    distance: st.distance ? Math.round(st.distance) : null,
+                    azimuth: st.azimuth,
+                    language: st.language,
+                    timeUTC: st.timeUTC,
+                    source: st.source
+                })
+            }).done(data => {
+                if (data.success) {
+                    this.favorites = data.favorites;
+                    this._renderStation(); 
+                    if (typeof AnalogScaleEngine !== 'undefined' && typeof AnalogScaleEngine.fetchMwLwFavorites === 'function') {
+                        AnalogScaleEngine.fetchMwLwFavorites();
+                    }
+                }
+            });
         }
 
         _areListsEqual(a, b) {
