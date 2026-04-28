@@ -670,6 +670,7 @@
             } else {
                 this.elements.favBtn.hide();
             }
+			this._renderAfList(station.alternative_frequencies, currentStationFreq);
             this.elements.display.css('cursor', station.distance !== null ? 'pointer' : 'default');
         }
 
