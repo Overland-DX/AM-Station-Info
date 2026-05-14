@@ -1,9 +1,9 @@
 // Plugin configuration, this is used in the administration when plugins are loaded
 var pluginConfig = {
-    name: 'AM-Station-Info',
-    version: '1.4.1',
+    name: 'AM Station Info',
+    version: '2.0',
     author: 'ODX',
-    frontEndPath: 'am-station-info/am-station-info-main.js'
+    frontEndPath: 'am-station-info/am-station-info.js'
 }
 
 // Backend (server) changes can go here...
